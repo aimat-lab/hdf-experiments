@@ -6,10 +6,12 @@
 # locally. Pinned third-party versions live in ../requirements.txt.
 FROM python:3.11-slim
 
-# -- system libraries required by RDKit, matplotlib and scientific wheels --
+# -- system libraries required by RDKit, matplotlib, cairosvg (pulled in by
+#    chem-mat-database) and other scientific wheels --
 RUN apt-get update -q && apt-get install -y --no-install-recommends \
         build-essential git \
         libxrender1 libxext6 libsm6 libgl1 \
+        libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PIP_NO_CACHE_DIR=1 \
