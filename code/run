@@ -36,8 +36,8 @@ mkdir -p "$RESULTS_DIR/figures"
 
 case "$TIER" in
   smoke) SEEDS=(0);           SUB=300;  SIZES=(32 2048);                     BO_DIM=64; BO_TRIALS=2;  BO_ROUNDS=10; BIO_REPS=3;  BIO_SETS=() ;;
-  demo)  SEEDS=(0 1 2);       SUB=2000; SIZES=(32 64 128 256 512 2048);      BO_DIM=64; BO_TRIALS=5;  BO_ROUNDS=25; BIO_REPS=10; BIO_SETS=() ;;   # bioactivity is full-only (riniker_1 ~168k molecules is too heavy to HDC-encode on CPU)
-  full)  SEEDS=(0 1 2 3 4);   SUB=None; SIZES=(32 64 128 256 512 1024 2048); BO_DIM=64; BO_TRIALS=25; BO_ROUNDS=25; BIO_REPS=50; BIO_SETS=(dud_e muv riniker_1 riniker_2) ;;
+  demo)  SEEDS=(0 1 2);       SUB=2000; SIZES=(32 128 512 2048); BO_DIM=64; BO_TRIALS=5;  BO_ROUNDS=25; BIO_REPS=10; BIO_SETS=() ;;   # bioactivity is full-only (riniker_1 ~168k molecules is too heavy to HDC-encode on CPU)
+  full)  SEEDS=(0 1 2 3 4);   SUB=None; SIZES=(32 128 512 2048); BO_DIM=64; BO_TRIALS=25; BO_ROUNDS=25; BIO_REPS=50; BIO_SETS=(dud_e muv riniker_1 riniker_2) ;;
   *) echo "unknown TIER=$TIER (use smoke|demo|full)"; exit 2 ;;
 esac
 

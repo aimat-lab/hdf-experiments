@@ -31,6 +31,9 @@ PATH = str(pathlib.Path(__file__).parent.absolute())
 RESULTS_PATH = os.path.join(PATH, 'results')
 FIG_DIR = os.path.join(PATH, 'figures')
 GED_PREFIX = 'ex_08_a'
+# Embedding sizes shown, in the paper's canonical set. (Other sizes present in
+# the archives are ignored so the demo and paper figures line up.)
+GED_SIZES = [32, 128, 512, 2048]
 
 apply_style()
 
@@ -66,7 +69,8 @@ def main():
         raise SystemExit(f'No GED archives found under {RESULTS_PATH} '
                          f'(need molecule_similarity runs with __PREFIX__={GED_PREFIX}).')
 
-    sizes = sorted({size for _enc, size in ged})
+    present = {size for _enc, size in ged}
+    sizes = [s for s in GED_SIZES if s in present] or sorted(present)
     print('GED embedding sizes:', sizes,
           '| queries per (enc,size):', {k: len(v) for k, v in sorted(ged.items())})
 
