@@ -1,0 +1,29 @@
+pycomex: true
+extend: predict_bioactivity__fp.py
+parameters:
+  # Dataset parameters
+  DATASET_NAME: "dud_e"
+  DATASET_NAME_ID: "dud_e"
+  NUM_DATA: null  # Use full dataset
+  SEED: 1
+
+  # Evaluation parameters
+  NUM_QUERY_ACTIVES: 5        # Standard 5 queries per repetition
+  NUM_REPETITIONS: 50          # Statistical repetitions per target
+  MIN_ACTIVES_PER_TARGET: 10   # Skip targets with fewer actives
+
+  # Metric parameters
+  BEDROC_ALPHA: 20.0          # Standard α=20 for virtual screening
+  EF_PERCENTAGES: [0.01, 0.05]  # EF at 1% and 5%
+
+  # Fingerprint parameters
+  FP_TYPE: "ecfp4"            # ECFP4 (Morgan radius=2)
+  FP_SIZE: 2048               # 2048 bits
+  FP_RADIUS: 2                # Radius for Morgan fingerprint
+  USE_COUNTS: false           # Binary fingerprint
+
+  # Visualization
+  NUM_EXAMPLE_TARGETS: 3
+  FIGURE_DPI: 300
+
+  NOTE: "ECFP4 baseline for bioactivity prediction on DUD-E (Directory of Useful Decoys, Enhanced) dataset with 102 targets - standard virtual screening benchmark"

@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Reproducible-run driver for the Hyperdimensional Fingerprints (HDF) artifact.
+#
+# This is the entry point for a Code Ocean "Reproducible Run". It executes a
+# SCALED-DOWN demonstration of the paper's experiments on small datasets so that
+# it completes within the capsule's compute budget, then generates figures and
+# collects all outputs into $RESULTS_DIR (/results on Code Ocean).
+#
+# The FULL protocol from the paper (all 9 datasets, embedding sweeps, 5 seeds,
+# 25 BO trials, 50 screening repetitions) is reproduced by `TIER=full bash run`
+# but requires a multi-core cluster and network access for the large datasets
+# (qm9_smiles ~670 MB, zinc250k, compas_3x). See README.md.
+#
+# Tiers:   TIER=smoke  (minutes, 1 seed)   -- CI-style sanity check
+#          TIER=demo   (hours, 3 seeds)    -- DEFAULT, representative figures
+#          TIER=full   (cluster, 5 seeds)  -- full paper protocol
+#
+# Every experiment step is fault-tolerant: a failure is logged and the run
+# continues, so partial results and figures are still collected.
+# =============================================================================
+set -uo pipefail
+cd "$(dirname "$0")"                       # -> /code
+EXP="experiments/fingerprints"
+export MPLBACKEND=Agg
+
+TIER="${TIER:-demo}"
+RESULTS_DIR="${RESULTS_DIR:-/results}"
+if ! ( mkdir -p "$RESULTS_DIR" && [ -w "$RESULTS_DIR" ] ) 2>/dev/null; then
+    RESULTS_DIR="$(pwd)/results_out"; mkdir -p "$RESULTS_DIR"
+fi
+mkdir -p "$RESULTS_DIR/figures"
+
+case "$TIER" in
+  smoke) SEEDS=(0);           SUB=300;  SIZES=(32 2048);                     BO_DIM=64; BO_TRIALS=2;  BO_ROUNDS=10; BIO_REPS=3;  BIO_SETS=() ;;
+  demo)  SEEDS=(0 1 2);       SUB=2000; SIZES=(32 64 128 256 512 2048);      BO_DIM=64; BO_TRIALS=5;  BO_ROUNDS=25; BIO_REPS=10; BIO_SETS=(riniker_1) ;;
+  full)  SEEDS=(0 1 2 3 4);   SUB=None; SIZES=(32 64 128 256 512 1024 2048); BO_DIM=64; BO_TRIALS=25; BO_ROUNDS=25; BIO_REPS=50; BIO_SETS=(dud_e muv riniker_1 riniker_2) ;;
+  *) echo "unknown TIER=$TIER (use smoke|demo|full)"; exit 2 ;;
+esac
+
+# special pycomex params applied to every run:
+#  __DEBUG__=False  -> full (non-debug) archives
+#  __CACHING__=False -> avoid the dataset-name-keyed load cache poisoning across NUM_DATA
+COMMON=(--__DEBUG__="False" --__CACHING__="False")
+
+echo "########################################################################"
+echo "# HDF artifact reproducible run   TIER=$TIER   ->  $RESULTS_DIR"
+echo "########################################################################"
+START=$SECONDS
+
+run_exp() {
+    local y="$1"; shift
+    echo; echo ">>> pycomex run $EXP/$y $*"
+    pycomex run "$EXP/$y" "${COMMON[@]}" "$@" || echo "!!! FAILED: $y (continuing)"
+}
+
+# -- 1. Property prediction across ML models & fingerprints (Fig 1 / Table 1) --
+echo; echo "===== [1/4] property prediction ====="
+for seed in "${SEEDS[@]}"; do
+  for ds in hopv15_exp bace aqsoldb clogp; do
+    run_exp "predict_molecules__hdc__${ds}.yml" --SEED="$seed" --NUM_DATA="$SUB"
+    run_exp "predict_molecules__fp__${ds}.yml"  --SEED="$seed" --NUM_DATA="$SUB"
+  done
+done
+
+# -- 2. Graph-edit-distance correlation across embedding sizes (Fig ged, a) --
+echo; echo "===== [2/4] GED correlation sweep ====="
+for size in "${SIZES[@]}"; do
+  run_exp "molecule_similarity__hdc__qm9_smiles.yml" \
+      --__PREFIX__="'ex_08_a'" --SEED="0" --NUM_DATA="$SUB" \
+      --GED_NUM_SAMPLES="10" --EMBEDDING_SIZE="$size"
+  run_exp "molecule_similarity__fp__qm9_smiles.yml" \
+      --__PREFIX__="'ex_08_a'" --SEED="0" --NUM_DATA="$SUB" \
+      --GED_NUM_SAMPLES="10" --FINGERPRINT_SIZE="$size"
+done
+
+# -- 3. Bayesian optimization, low-dim ClogP targeting (Fig bo) --------------
+echo; echo "===== [3/4] Bayesian optimization ====="
+run_exp "optimize_molecule_bo__hdc__clogp.yml" \
+    --SEED="0" --NUM_DATA="$SUB" --EMBEDDING_SIZE="$BO_DIM" \
+    --NUM_TRIALS="$BO_TRIALS" --NUM_BO_ROUNDS="$BO_ROUNDS"
+run_exp "optimize_molecule_bo__fp__clogp.yml" \
+    --SEED="0" --NUM_DATA="$SUB" \
+    --NUM_TRIALS="$BO_TRIALS" --NUM_BO_ROUNDS="$BO_ROUNDS"
+run_exp "optimize_molecule_bo__random__clogp.yml" \
+    --SEED="0" --NUM_DATA="$SUB" \
+    --NUM_TRIALS="$BO_TRIALS" --NUM_BO_ROUNDS="$BO_ROUNDS"
+
+# -- 4. Similarity-based virtual screening (supplementary) ------------------
+echo; echo "===== [4/4] virtual screening ====="
+for bset in "${BIO_SETS[@]}"; do
+  run_exp "predict_bioactivity__hdc__${bset}.yml" --__PREFIX__="'ex_11_bioact'" --NUM_REPETITIONS="$BIO_REPS"
+  run_exp "predict_bioactivity__fp__${bset}.yml"  --__PREFIX__="'ex_11_bioact'" --NUM_REPETITIONS="$BIO_REPS"
+done
+
+# -- 5. Turnkey combined GED figure -----------------------------------------
+echo; echo "===== generating figure_ged ====="
+( cd "$EXP" && python make_figure_ged.py ) || echo "!!! make_figure_ged.py failed (continuing)"
+
+# -- 6. Collect metrics summary + every figure produced into $RESULTS_DIR ----
+echo; echo "===== collecting outputs ====="
+python collect_outputs.py "$EXP" "$RESULTS_DIR" || echo "!!! collect_outputs.py failed"
+
+echo
+echo "########################################################################"
+echo "# DONE in $((SECONDS - START))s.   Browse results in: $RESULTS_DIR"
+echo "########################################################################"

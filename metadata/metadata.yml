@@ -1,0 +1,36 @@
+metadata_version: 1
+
+name: "Hyperdimensional Fingerprints: training-free molecular representations"
+
+description: >-
+  Reproducibility artifact for the paper "Hyperdimensional Fingerprints (HDF)".
+  HDF replaces the learned transformations of message-passing graph neural
+  networks with algebraic operations on high-dimensional vectors, producing
+  deterministic, training-free molecular representations. This capsule contains
+  the hyperdimensional-computing library (`graph_hdc`) and the experiment code
+  that reproduces the paper's results: property prediction across fingerprint
+  methods and ML models, graph-edit-distance correlation, embedding-size
+  ablations, Bayesian molecular optimization, and similarity-based virtual
+  screening. The Reproducible Run executes a scaled-down demonstration on small
+  datasets; the full protocol (all datasets, 5 seeds) requires a compute cluster
+  and is documented in README.md.
+
+tags:
+  - molecular-fingerprints
+  - hyperdimensional-computing
+  - cheminformatics
+  - graph-neural-networks
+  - property-prediction
+  - bayesian-optimization
+
+authors:
+  - name: "Jonas Teufel"
+    # TODO: fill in affiliation / ORCID before publication
+    affiliations:
+      - name: "TODO: institution"
+
+corresponding_contributor:
+  name: "Jonas Teufel"
+  email: "jonseb1998@gmail.com"
+
+license: "MIT"

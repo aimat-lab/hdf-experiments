@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Post-install hook (runs once during the environment build, which HAS network).
+#
+# Warm the chem-mat-database download cache with the SMALL datasets used by the
+# scaled-down Reproducible Run, so that a sandboxed run (no network) can load
+# them from cache. The large datasets (qm9_smiles ~670 MB, zinc250k, compas_3x)
+# are intentionally NOT prefetched here to keep the image small; the full-scale
+# runs download them on demand and must therefore be executed in an environment
+# with network access (a normal interactive Cloud Workstation, or a cluster).
+set -eu
+
+python - <<'PY'
+from chem_mat_data.main import load_graph_dataset
+# small, fast demo datasets only
+for name in ["hopv15_exp", "freesolv", "bace_reg", "aqsoldb"]:
+    try:
+        load_graph_dataset(name)
+        print(f"[postInstall] cached dataset: {name}")
+    except Exception as exc:  # non-fatal: run can still fetch at runtime if online
+        print(f"[postInstall] WARN could not prefetch {name}: {exc}")
+PY
