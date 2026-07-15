@@ -8,13 +8,15 @@ name: hdc_bace
 description: |
   HDC-based molecular property prediction on the BACE dataset.
 
-  BACE (Beta-secretase 1) is a binary classification dataset for binding results for
-  inhibitors of human β-secretase 1 (BACE-1).
+  BACE (Beta-secretase 1) contains inhibitors of human β-secretase 1 (BACE-1)
+  with measured binding affinities (IC50), treated here as a regression task
+  (dataset identifier ``bace_reg``), as reported in the paper.
 
 parameters:
-  DATASET_NAME: "bace"
-  DATASET_NAME_ID: "bace"
-  DATASET_TYPE: "binary"
+  DATASET_NAME: "bace_reg"
+  DATASET_NAME_ID: "bace_reg"
+  DATASET_TYPE: "regression"
+  TARGET_INDEX: 0
   NUM_TEST: 0.1
   EMBEDDING_SIZE: 2048
   NUM_LAYERS: 2

@@ -228,10 +228,17 @@ def main():
                   error_kw={'linewidth': 1.3, 'capthick': 1.3})
 
     # AUC sub-axis (upper)
-    auc_all = [bio[k]['auc'][0] + bio[k]['auc'][1] for k in bio]
-    auc_lo = [bio[k]['auc'][0] - bio[k]['auc'][1] for k in bio]
     ax_auc.axhline(0.5, color='gray', linestyle='--', linewidth=1.1, alpha=0.8, zorder=0)
-    ax_auc.set_ylim(min(0.5, min(auc_lo)) - 0.04, max(auc_all) + 0.04)
+    if bio:
+        auc_all = [bio[k]['auc'][0] + bio[k]['auc'][1] for k in bio]
+        auc_lo = [bio[k]['auc'][0] - bio[k]['auc'][1] for k in bio]
+        ax_auc.set_ylim(min(0.5, min(auc_lo)) - 0.04, max(auc_all) + 0.04)
+    else:
+        # No virtual-screening archives (e.g. the scaled-down demo run): render
+        # the GED panel alone rather than crashing on empty data.
+        ax_auc.text(0.5, 0.5, 'no virtual-screening data\n(run TIER=full)',
+                    transform=ax_auc.transAxes, ha='center', va='center',
+                    fontsize=9, color='gray', style='italic')
     ax_auc.set_ylabel('ROC-AUC $\\uparrow$', fontsize=FONT_SIZE + 1)
     ax_auc.grid(True, axis='y', alpha=0.25)
     ax_auc.tick_params(labelbottom=False)
@@ -240,9 +247,10 @@ def main():
                     fontsize=FONT_SIZE - 3, color='gray', style='italic')
 
     # EF sub-axis (lower)
-    ef_all = [bio[k]['ef'][0] + bio[k]['ef'][1] for k in bio]
     ax_ef.axhline(1.0, color='gray', linestyle='--', linewidth=1.1, alpha=0.8, zorder=0)
-    ax_ef.set_ylim(0, max(ef_all) * 1.12)
+    if bio:
+        ef_all = [bio[k]['ef'][0] + bio[k]['ef'][1] for k in bio]
+        ax_ef.set_ylim(0, max(ef_all) * 1.12)
     ax_ef.set_ylabel('EF$_{1\\%}$ $\\uparrow$', fontsize=FONT_SIZE + 1)
     ax_ef.grid(True, axis='y', alpha=0.25)
     ax_ef.set_xticks(x)

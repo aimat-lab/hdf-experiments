@@ -23,6 +23,9 @@ set -uo pipefail
 cd "$(dirname "$0")"                       # -> /code
 EXP="experiments/fingerprints"
 export MPLBACKEND=Agg
+# make the vendored `graph_hdc` package importable even after we cd into the
+# experiment directory (needed for the YAML extend/include path resolution).
+export PYTHONPATH="$(pwd)${PYTHONPATH:+:$PYTHONPATH}"
 
 TIER="${TIER:-demo}"
 RESULTS_DIR="${RESULTS_DIR:-/results}"
@@ -33,10 +36,16 @@ mkdir -p "$RESULTS_DIR/figures"
 
 case "$TIER" in
   smoke) SEEDS=(0);           SUB=300;  SIZES=(32 2048);                     BO_DIM=64; BO_TRIALS=2;  BO_ROUNDS=10; BIO_REPS=3;  BIO_SETS=() ;;
-  demo)  SEEDS=(0 1 2);       SUB=2000; SIZES=(32 64 128 256 512 2048);      BO_DIM=64; BO_TRIALS=5;  BO_ROUNDS=25; BIO_REPS=10; BIO_SETS=(riniker_1) ;;
+  demo)  SEEDS=(0 1 2);       SUB=2000; SIZES=(32 64 128 256 512 2048);      BO_DIM=64; BO_TRIALS=5;  BO_ROUNDS=25; BIO_REPS=10; BIO_SETS=() ;;   # bioactivity is full-only (riniker_1 ~168k molecules is too heavy to HDC-encode on CPU)
   full)  SEEDS=(0 1 2 3 4);   SUB=None; SIZES=(32 64 128 256 512 1024 2048); BO_DIM=64; BO_TRIALS=25; BO_ROUNDS=25; BIO_REPS=50; BIO_SETS=(dud_e muv riniker_1 riniker_2) ;;
   *) echo "unknown TIER=$TIER (use smoke|demo|full)"; exit 2 ;;
 esac
+
+# In the scaled-down tiers, force fractional train/val/test splits so subsampled
+# runs never hit "sample larger than population" from configs that hard-code an
+# absolute test-set size (e.g. NUM_TEST: 1000, sized for the full dataset). The
+# `full` tier uses each config's own split settings unchanged.
+if [ "$TIER" = "full" ]; then SPLIT=(); else SPLIT=(--NUM_TEST="0.1" --NUM_VAL="0.1"); fi
 
 # special pycomex params applied to every run:
 #  __DEBUG__=False  -> full (non-debug) archives
@@ -50,16 +59,24 @@ START=$SECONDS
 
 run_exp() {
     local y="$1"; shift
-    echo; echo ">>> pycomex run $EXP/$y $*"
-    pycomex run "$EXP/$y" "${COMMON[@]}" "$@" || echo "!!! FAILED: $y (continuing)"
+    echo; echo ">>> pycomex run $y $*  (cwd=$EXP)"
+    # pycomex resolves the YAML's `extend:`/`include:` relative to the CWD, so
+    # run each experiment from inside its own directory.
+    ( cd "$EXP" && pycomex run "$y" "${COMMON[@]}" "$@" ) || echo "!!! FAILED: $y (continuing)"
 }
 
 # -- 1. Property prediction across ML models & fingerprints (Fig 1 / Table 1) --
 echo; echo "===== [1/4] property prediction ====="
 for seed in "${SEEDS[@]}"; do
   for ds in hopv15_exp bace aqsoldb clogp; do
-    run_exp "predict_molecules__hdc__${ds}.yml" --SEED="$seed" --NUM_DATA="$SUB"
-    run_exp "predict_molecules__fp__${ds}.yml"  --SEED="$seed" --NUM_DATA="$SUB"
+    # small datasets (hopv15_exp=175, bace_reg=1513) are smaller than SUB, so
+    # subsampling would raise "sample larger than population" -- use all of them.
+    case "$ds" in
+      hopv15_exp|bace) nd="None" ;;
+      *)               nd="$SUB" ;;
+    esac
+    run_exp "predict_molecules__hdc__${ds}.yml" --SEED="$seed" --NUM_DATA="$nd" "${SPLIT[@]}"
+    run_exp "predict_molecules__fp__${ds}.yml"  --SEED="$seed" --NUM_DATA="$nd" "${SPLIT[@]}"
   done
 done
 

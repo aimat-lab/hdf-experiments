@@ -26,16 +26,20 @@ def find_archives(results_root: str):
             yield dirpath
 
 
-def flatten_metrics(metrics: dict) -> dict:
-    """Pull scalar metrics (r2/mae/mse/... possibly nested under test_*) up flat."""
+def flatten_metrics(metrics: dict, prefix: str = '') -> dict:
+    """Recursively flatten a (possibly deeply nested) metrics dict to dotted
+    keys with numeric leaves, e.g. ``neural_net.test.mae -> 0.84``. Handles both
+    the per-model regression metrics (predict_molecules) and the flat scalar
+    metrics (optimize_molecule_bo)."""
     out = {}
     for key, val in (metrics or {}).items():
+        name = f'{prefix}.{key}' if prefix else str(key)
         if isinstance(val, dict):
-            for sub, subval in val.items():
-                if isinstance(subval, (int, float)):
-                    out[f'{key}.{sub}'] = subval
+            out.update(flatten_metrics(val, name))
+        elif isinstance(val, bool):
+            continue
         elif isinstance(val, (int, float)):
-            out[key] = val
+            out[name] = val
     return out
 
 

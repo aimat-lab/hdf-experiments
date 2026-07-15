@@ -25,8 +25,12 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt
 
-# -- the chem-mat-database package (dataset access) is distributed via git --
-RUN pip install "chem_mat_database @ git+https://github.com/the16thpythonist/chem_mat_data.git"
+# -- packages distributed via git (not on PyPI) --
+#    chem-mat-database: dataset access by identifier
+#    vgd_counterfactuals: n-hop molecular neighborhood generation for the GED
+#      correlation experiment (pulls in visual-graph-datasets)
+RUN pip install "chem_mat_database @ git+https://github.com/the16thpythonist/chem_mat_data.git" \
+    && pip install "vgd_counterfactuals @ git+https://github.com/the16thpythonist/vgd_counterfactuals.git"
 
 # The library `graph_hdc` is NOT pip-installed: it is vendored under /code and
 # imported directly (Code Ocean sets the working directory to /code at run time).
