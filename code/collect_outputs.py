@@ -82,17 +82,10 @@ def main() -> None:
         }
         rows.append(row)
 
-        # --- figures produced inside the archive ---
-        for fn in os.listdir(archive):
-            if fn.lower().endswith(('.pdf', '.png', '.svg')):
-                dst = os.path.join(fig_out, f'{namespace}__{fn}')
-                try:
-                    shutil.copy2(os.path.join(archive, fn), dst)
-                    n_figs += 1
-                except Exception as exc:
-                    print(f'  ! could not copy {fn}: {exc}')
-
-    # --- figures produced by the standalone figure scripts (e.g. figure_ged) ---
+    # We intentionally do NOT collect the many exploratory plots each experiment
+    # writes into its own archive (regression scatters, per-trial BO
+    # trajectories, similarity grids, ...). Only the curated, paper-quality
+    # figures produced by the make_figure_*.py scripts are surfaced.
     script_fig_dir = os.path.join(exp_dir, 'figures')
     if os.path.isdir(script_fig_dir):
         for fn in os.listdir(script_fig_dir):

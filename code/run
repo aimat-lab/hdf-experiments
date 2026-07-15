@@ -47,6 +47,24 @@ esac
 # `full` tier uses each config's own split settings unchanged.
 if [ "$TIER" = "full" ]; then SPLIT=(); else SPLIT=(--NUM_TEST="0.1" --NUM_VAL="0.1"); fi
 
+# GED sweep sampling: the correlation is estimated over GED_SAMPLES query
+# molecules (shared across embedding sizes). Too few queries makes an individual
+# box noisy, so use a generous count even in the demo.
+case "$TIER" in
+  smoke) GED_SAMPLES=8;  GED_POOL=1500 ;;
+  demo)  GED_SAMPLES=25; GED_POOL=5000 ;;
+  full)  GED_SAMPLES=50; GED_POOL=None ;;
+esac
+
+# Property-prediction datasets. The demo uses only datasets large enough for a
+# stable R^2 (HOPV15's 175 molecules give meaningless variance at demo scale);
+# the full tier runs the complete set reported in the paper.
+case "$TIER" in
+  smoke) PRED_DATASETS="bace clogp" ;;
+  demo)  PRED_DATASETS="bace lipop aqsoldb clogp" ;;
+  full)  PRED_DATASETS="hopv15_exp bace lipop aqsoldb clogp compas qm9_smiles zinc250" ;;
+esac
+
 # special pycomex params applied to every run:
 #  __DEBUG__=False  -> full (non-debug) archives
 #  __CACHING__=False -> avoid the dataset-name-keyed load cache poisoning across NUM_DATA
@@ -68,7 +86,7 @@ run_exp() {
 # -- 1. Property prediction across ML models & fingerprints (Fig 1 / Table 1) --
 echo; echo "===== [1/4] property prediction ====="
 for seed in "${SEEDS[@]}"; do
-  for ds in hopv15_exp bace aqsoldb clogp; do
+  for ds in $PRED_DATASETS; do
     # small datasets (hopv15_exp=175, bace_reg=1513) are smaller than SUB, so
     # subsampling would raise "sample larger than population" -- use all of them.
     case "$ds" in
@@ -84,11 +102,11 @@ done
 echo; echo "===== [2/4] GED correlation sweep ====="
 for size in "${SIZES[@]}"; do
   run_exp "molecule_similarity__hdc__qm9_smiles.yml" \
-      --__PREFIX__="'ex_08_a'" --SEED="0" --NUM_DATA="$SUB" \
-      --GED_NUM_SAMPLES="10" --EMBEDDING_SIZE="$size"
+      --__PREFIX__="'ex_08_a'" --SEED="0" --NUM_DATA="$GED_POOL" \
+      --GED_NUM_SAMPLES="$GED_SAMPLES" --EMBEDDING_SIZE="$size"
   run_exp "molecule_similarity__fp__qm9_smiles.yml" \
-      --__PREFIX__="'ex_08_a'" --SEED="0" --NUM_DATA="$SUB" \
-      --GED_NUM_SAMPLES="10" --FINGERPRINT_SIZE="$size"
+      --__PREFIX__="'ex_08_a'" --SEED="0" --NUM_DATA="$GED_POOL" \
+      --GED_NUM_SAMPLES="$GED_SAMPLES" --FINGERPRINT_SIZE="$size"
 done
 
 # -- 3. Bayesian optimization, low-dim ClogP targeting (Fig bo) --------------
@@ -110,9 +128,11 @@ for bset in "${BIO_SETS[@]}"; do
   run_exp "predict_bioactivity__fp__${bset}.yml"  --__PREFIX__="'ex_11_bioact'" --NUM_REPETITIONS="$BIO_REPS"
 done
 
-# -- 5. Turnkey combined GED figure -----------------------------------------
-echo; echo "===== generating figure_ged ====="
-( cd "$EXP" && python make_figure_ged.py ) || echo "!!! make_figure_ged.py failed (continuing)"
+# -- 5. Paper-quality figures (the only figures surfaced to the reviewer) -----
+echo; echo "===== generating figures ====="
+for figscript in make_figure_prediction.py make_figure_ged.py make_figure_bo.py; do
+  ( cd "$EXP" && python "$figscript" ) || echo "!!! $figscript failed (continuing)"
+done
 
 # -- 6. Collect metrics summary + every figure produced into $RESULTS_DIR ----
 echo; echo "===== collecting outputs ====="
