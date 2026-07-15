@@ -17,6 +17,7 @@ import sys
 import csv
 import json
 import shutil
+from collections import defaultdict
 
 
 def find_archives(results_root: str):
@@ -64,14 +65,21 @@ def main() -> None:
                 data = json.load(open(dj))
             except Exception as exc:
                 print(f'  ! could not read {dj}: {exc}')
-        params = data.get('parameters', {}) or {}
+        # pycomex does not persist a `parameters` block, so derive the
+        # experiment family / representation / dataset from the namespace,
+        # e.g. "predict_molecules__hdc__bace" -> (predict_molecules, hdc, bace).
+        parts = namespace.split('__')
+        family = parts[0]
+        method = parts[1] if len(parts) > 2 else ''
+        dataset = parts[-1] if len(parts) > 2 else (parts[1] if len(parts) > 1 else '')
+        run_id = os.path.basename(rel)  # distinguishes seeds/repetitions
         row = {
-            'namespace': namespace,
-            'archive': rel,
-            'dataset': params.get('DATASET_NAME'),
-            'prefix': params.get('__PREFIX__'),
+            'family': family,
+            'method': method,
+            'dataset': dataset,
+            'run': run_id,
+            'metrics': flatten_metrics(data.get('metrics', {})),
         }
-        row.update(flatten_metrics(data.get('metrics', {})))
         rows.append(row)
 
         # --- figures produced inside the archive ---
@@ -96,34 +104,50 @@ def main() -> None:
                 except Exception as exc:
                     print(f'  ! could not copy {fn}: {exc}')
 
-    # --- write the summary table ---
-    all_cols = []
-    for r in rows:
-        for k in r:
-            if k not in all_cols:
-                all_cols.append(k)
-
+    # --- write summary.csv: one row per archive, its own metrics inline ---
     csv_path = os.path.join(results_dir, 'summary.csv')
+    metric_keys = []
+    for r in rows:
+        for k in r['metrics']:
+            if k not in metric_keys:
+                metric_keys.append(k)
     with open(csv_path, 'w', newline='') as f:
-        w = csv.DictWriter(f, fieldnames=all_cols)
-        w.writeheader()
-        w.writerows(rows)
+        w = csv.writer(f)
+        w.writerow(['family', 'method', 'dataset', 'run'] + metric_keys)
+        for r in rows:
+            w.writerow([r['family'], r['method'], r['dataset'], r['run']]
+                       + [r['metrics'].get(k, '') for k in metric_keys])
+
+    # --- write summary.md: grouped by family, each row shows its own metrics ---
+    def fmt(v):
+        return f'{v:.4g}' if isinstance(v, float) else str(v)
 
     md_path = os.path.join(results_dir, 'summary.md')
     with open(md_path, 'w') as f:
-        f.write(f'# Reproducible-run summary\n\n')
+        f.write('# Reproducible-run summary\n\n')
         f.write(f'- experiment archives found: **{len(rows)}**\n')
         f.write(f'- figures collected: **{n_figs}** (see `figures/`)\n\n')
-        # compact per-archive metric view
-        metric_cols = [c for c in all_cols
-                       if c not in ('namespace', 'archive', 'dataset', 'prefix')]
-        show = ['namespace', 'dataset'] + metric_cols[:8]
-        f.write('| ' + ' | '.join(show) + ' |\n')
-        f.write('| ' + ' | '.join('---' for _ in show) + ' |\n')
+        by_family = defaultdict(list)
         for r in rows:
-            f.write('| ' + ' | '.join(
-                f'{r.get(c, "")}' if not isinstance(r.get(c), float)
-                else f'{r.get(c):.4g}' for c in show) + ' |\n')
+            by_family[r['family']].append(r)
+        for family in sorted(by_family):
+            frows = by_family[family]
+            # columns = the metric keys actually present in this family
+            fkeys = []
+            for r in frows:
+                for k in r['metrics']:
+                    if k not in fkeys:
+                        fkeys.append(k)
+            fkeys = fkeys[:12]
+            f.write(f'## {family}\n\n')
+            head = ['method', 'dataset', 'run'] + fkeys
+            f.write('| ' + ' | '.join(head) + ' |\n')
+            f.write('| ' + ' | '.join('---' for _ in head) + ' |\n')
+            for r in sorted(frows, key=lambda x: (x['method'], x['dataset'], x['run'])):
+                cells = [r['method'], r['dataset'], r['run']] + \
+                        [fmt(r['metrics'].get(k, '')) for k in fkeys]
+                f.write('| ' + ' | '.join(cells) + ' |\n')
+            f.write('\n')
 
     print(f'\nWrote {csv_path}')
     print(f'Wrote {md_path}')
