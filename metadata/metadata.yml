@@ -1,19 +1,21 @@
 metadata_version: 1
 
-name: "Hyperdimensional Fingerprints: training-free molecular representations"
+name: "Hyper-Dimensional Fingerprints as Molecular Representations"
 
 description: >-
-  Reproducibility artifact for the paper "Hyperdimensional Fingerprints (HDF)".
-  HDF replaces the learned transformations of message-passing graph neural
-  networks with algebraic operations on high-dimensional vectors, producing
-  deterministic, training-free molecular representations. This capsule contains
-  the hyperdimensional-computing library (`graph_hdc`) and the experiment code
-  that reproduces the paper's results: property prediction across fingerprint
-  methods and ML models, graph-edit-distance correlation, embedding-size
-  ablations, Bayesian molecular optimization, and similarity-based virtual
-  screening. The Reproducible Run executes a scaled-down demonstration on small
-  datasets; the full protocol (all datasets, 5 seeds) requires a compute cluster
-  and is documented in README.md.
+  Reproducibility artifact for the paper "Hyper-Dimensional Fingerprints as
+  Molecular Representations" (preprint: arXiv:2604.27810).
+  Hyperdimensional fingerprints (HDF) replace the learned transformations of
+  message-passing graph neural networks with algebraic operations on
+  high-dimensional vectors, producing deterministic, training-free molecular
+  representations. This capsule contains the hyperdimensional-computing library
+  (`graph_hdc`) and the experiment code that reproduces the paper's results:
+  property prediction across fingerprint methods and ML models,
+  graph-edit-distance correlation, embedding-size ablations, Bayesian molecular
+  optimization, and similarity-based virtual screening. The Reproducible Run
+  executes a scaled-down demonstration on small datasets; the full protocol
+  (all datasets, 5 seeds) requires a compute cluster and is documented in
+  README.md.
 
 tags:
   - molecular-fingerprints
@@ -25,12 +27,27 @@ tags:
 
 authors:
   - name: "Jonas Teufel"
-    # TODO: fill in affiliation / ORCID before publication
+    orcid: "0000-0002-9228-9395"
     affiliations:
-      - name: "TODO: institution"
+      - name: "Institute of Nanotechnology (INT), Karlsruhe Institute of Technology (KIT), Karlsruhe, Germany"
+      - name: "Institute of Anthropomatics and Robotics (IAR), Karlsruhe Institute of Technology (KIT), Karlsruhe, Germany"
+  - name: "Luca Torresi"
+    orcid: "0000-0003-2205-6753"
+    affiliations:
+      - name: "Institute of Nanotechnology (INT), Karlsruhe Institute of Technology (KIT), Karlsruhe, Germany"
+      - name: "Institute of Anthropomatics and Robotics (IAR), Karlsruhe Institute of Technology (KIT), Karlsruhe, Germany"
+  - name: "André Eberhard"
+    affiliations:
+      - name: "Institute of Nanotechnology (INT), Karlsruhe Institute of Technology (KIT), Karlsruhe, Germany"
+      - name: "Institute of Anthropomatics and Robotics (IAR), Karlsruhe Institute of Technology (KIT), Karlsruhe, Germany"
+  - name: "Pascal Friederich"
+    orcid: "0000-0003-4465-1465"
+    affiliations:
+      - name: "Institute of Nanotechnology (INT), Karlsruhe Institute of Technology (KIT), Karlsruhe, Germany"
+      - name: "Institute of Anthropomatics and Robotics (IAR), Karlsruhe Institute of Technology (KIT), Karlsruhe, Germany"
 
 corresponding_contributor:
   name: "Jonas Teufel"
-  email: "jonseb1998@gmail.com"
+  email: "jonas.teufel@kit.edu"
 
 license: "MIT"
