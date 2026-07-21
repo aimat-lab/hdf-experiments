@@ -1,10 +1,19 @@
+# hash:sha256:ce0d4871776245aa971b24a9b1b466be6b7edc4c5f50772b0f2741d2d000eb35
+FROM registry.codeocean.com/codeocean/py-r:python3.12.8-R4.4.2-JupyterLab4.3.5-RStudiorstudio-server-2024.12.1-563-ubuntu22.04
+
 # Reproducible environment for the Hyperdimensional Fingerprints (HDF) artifact.
 #
-# On Code Ocean the base image is usually pulled from the Code Ocean registry;
-# this public base (python:3.11-slim, matching the development interpreter
-# 3.11.10) builds identically on any Docker host so reviewers can rebuild
-# locally. Pinned third-party versions live in ../requirements.txt.
-FROM python:3.11-slim
+# The base image above is a Code Ocean starter environment (Code Ocean only
+# accepts base images from its own `registry.codeocean.com` registry; public
+# Docker Hub images such as python:3.11-slim are rejected). NOTE: this base ships
+# Python 3.12.8, whereas the paper's results were generated on Python 3.11.10;
+# every version pinned in ../requirements.txt provides 3.12 wheels, so the stack
+# installs and runs cleanly. The leading `# hash:` line is Code Ocean's digest
+# pin for the base image -- keep it.
+#
+# Switch to root so the apt-get step below can install system packages (Code
+# Ocean base images default to a non-root user).
+USER 0:0
 
 # -- system libraries required by RDKit, matplotlib, cairosvg (pulled in by
 #    chem-mat-database) and other scientific wheels --
