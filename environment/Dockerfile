@@ -31,8 +31,32 @@ ENV PIP_NO_CACHE_DIR=1 \
 RUN pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1
 
 # -- remaining pinned third-party dependencies --
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install -r /tmp/requirements.txt
+#    These are inlined (rather than `COPY requirements.txt` + `pip install -r`)
+#    because Code Ocean's environment build context is the `environment/` folder
+#    and cannot access the repo-root requirements.txt. This list must mirror
+#    ../requirements.txt exactly.
+RUN pip install \
+        torch-geometric==2.6.1 \
+        pytorch-lightning==2.5.2 \
+        pycomex==0.28.0 \
+        rdkit==2025.9.1 \
+        scikit-learn==1.6.1 \
+        numpy==1.26.4 \
+        scipy==1.16.3 \
+        pandas==2.2.1 \
+        botorch==0.16.0 \
+        gpytorch==1.14.2 \
+        matplotlib==3.10.7 \
+        seaborn==0.13.2 \
+        umap-learn==0.5.7 \
+        imbalanced-learn==0.13.0 \
+        normflows==1.7.3 \
+        networkx==3.3 \
+        jsonpickle==4.1.1 \
+        python-decouple==3.8 \
+        rich-click==1.8.9 \
+        click==8.3.0 \
+        jinja2==3.1.6
 
 # -- packages distributed via git (not on PyPI) --
 #    chem-mat-database: dataset access by identifier

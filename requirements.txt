@@ -2,7 +2,10 @@
 # development environment (Python 3.11.10). `torch` is installed separately in
 # the Dockerfile from the CPU wheel index; `chem_mat_database` is installed from
 # git (see Dockerfile). These pins reproduce the exact software stack used to
-# generate the paper's results.
+# generate the paper's results. This file is used by the virtualenv install path
+# and as the canonical dependency record; environment/Dockerfile inlines the same
+# pins (Code Ocean's build context cannot COPY this repo-root file), so keep the
+# two lists in sync.
 torch-geometric==2.6.1
 pytorch-lightning==2.5.2
 pycomex==0.28.0
