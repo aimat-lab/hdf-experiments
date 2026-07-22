@@ -41,6 +41,23 @@ requirements.txt pinned third-party dependencies (Python 3.11)
 | Fig. `bo` — Bayesian optimization | ClogP / QED targeting | `optimize_molecule_bo__{hdc,fp,random}__*` |
 | Suppl. — virtual screening | similarity-based bioactivity ranking | `predict_bioactivity__{hdc,fp}__*` |
 
+## System requirements
+
+- **Operating system:** Linux (tested on Ubuntu 22.04). The pinned Docker image
+  runs on any host with a Docker engine; the virtualenv path works on any
+  Linux/macOS system with Python 3.11+.
+- **Python:** 3.11 (development) or 3.12 (the Code Ocean capsule base image). All
+  third-party dependencies and their versions are pinned in `requirements.txt`
+  and installed by `environment/Dockerfile`.
+- **Hardware:** no non-standard hardware is required. The environment installs
+  the **CPU build** of PyTorch, so the artifact runs on a standard CPU with **no
+  GPU**. The `demo` tier fits comfortably in ≈8 GB of RAM; the `full` protocol
+  needs a multi-core cluster (see below).
+- **Typical install time** (one-off, on a normal desktop with a broadband
+  connection): building the Docker image takes ≈15–30 min, dominated by
+  downloading the PyTorch, RDKit and other scientific wheels; subsequent builds
+  are cached. The virtualenv install takes ≈5–10 min.
+
 ## Running
 
 ### On Code Ocean
