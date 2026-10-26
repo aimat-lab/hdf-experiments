@@ -1,0 +1,144 @@
+# ex_24 -- Bayesian optimization benchmark (Figure 5; Supplementary Section S7, Figure S3, Tables S17 and S18)
+# Paper: main-text Figure 5 (ClogP on AqSolDB and QED on ZINC250k: regret per round at 16 and 1024 dims, regret AUC vs
+#   size; Morgan + Tanimoto vs HDF + linear kernel, random search dashed), Supplementary Section S7 (text numbers),
+#   Supplementary Figure S3 (regret AUC of all nine objectives, four surrogates). Tables S17/S18 (objectives and
+#   settings) are written by hand from the constants of bo_benchmark.py (OBJECTIVES, budgets, kernels), not generated.
+#   Supplementary Figure S4 (wall-clock) comes from the original benchmark ex_07_g: see ex_07_g.txt.
+# Source: graph_hdc revision/consolidated (bo_benchmark.py merged from revision/ex24-bo; runner run_ex24_kcist.sbatch).
+#   The lines rebuild the final state (rerun of 2026-10-13, 29,200 campaigns, KCIST jobs 51249-51289, submitted by
+#   submit_rerun.sh: tasks files per wave, encode -> run -> cleanup per wave) from scratch with the current code; no
+#   command file of the runs exists in the repository (they were sbatch environment variables). Local copy of the
+#   results: graph_hdc/.claude/worktrees/ex24bo/.../_ex24/kcist_rerun/ (campaigns.tsv, runs/).
+# Runs: 29,200 campaigns = 9 objectives x 100 campaigns x (8 sizes x {hdf_matern, hdf_linear, morgan_tanimoto} + up to
+#   8 sizes morgan_pca (FreeSolv/BEET fewer: PCA <= N-1 components) + random); 78 command lines: featurize 1, tasks 7,
+#   per wave encode 2 (w0) / 5 (w1-w5) + run 6 shards + cleanup 1, collect 1.
+# Protocol: objectives clogp (Crippen ClogP -> 15, AqSolDB), qed (-> 0.2, ZINC250k, whole library scored every round),
+#   solubility (max, AqSolDB), lipophilicity (max), freesolv (min), beet (max log10 LD50, exact values), qm9_gap (min)
+#   and qm9_dipole (max; both without zwitterions/ylides), melting_point (max, open melting point); stereo duplicates
+#   merged. Methods hdf_matern (HDF standard configuration, depth 2, Matern-5/2 on centred/globally scaled inputs),
+#   hdf_linear (HDF + linear/cosine kernel; the HDF surrogate of Fig. 5), morgan_tanimoto (radius 2, binary, folded to
+#   D bits), morgan_pca (first D PCA components of Morgan-2048, Matern-5/2), random. Sizes 8-1024; 100 campaigns per
+#   cell, campaign k shares its initial molecules across methods and has its own HDF codebook (seed 1000 + 100 k);
+#   budget 20 initial + 150 single picks (FreeSolv 20 + 80, BEET 10 + 40); LogEI; GP fits via BoTorch 0.16.0 / GPyTorch 1.14.2.
+# Analysis: python analyze_ex_24.py   (-> _ex24/analysis/summary.tsv|md, tests.tsv|md: paired Wilcoxon, Holm within each
+#             objective; families hdf_vs_morgan, hdf_linear_vs_morgan, vs random)
+#           python make_figure_bo.py figures   (-> figure_bo.pdf = Figure 5, figure_bo_si.pdf = Figure S3; reads
+#             campaigns.tsv, runs/ and analysis/tests.tsv; default output folder _ex24/analysis)
+#           python make_tables_bo.py _ex24/analysis   (bo_hdf_linear.tex, bo_runtime.tex: both tables were dropped from
+#             the SI on 2026-10-14; optional)
+# Cost: KCIST "small" nodes (64 CPUs, 4x RTX 4090, 400 GB requested): per wave about 45 min of encoding (5 nodes, ZINC250k
+#   D=1024 is the critical path, ~40 min per encoding at 4 threads) plus about 17 min of campaigns (6 nodes, 24 workers
+#   each; ZINC250k acquisition on the GPUs: 20-39 s per campaign up to D=128, 111-158 s at 1024); the whole rerun took
+#   about 9 h, i.e. roughly 3,000 CPU-h plus ~100 GPU-h. On CPU only (gpus -> 0), the ZINC250k/QED campaigns dominate
+#   (acquisition ~1.5 s per round on a CPU core vs ~0.1 s on a GPU).
+# Notes: all data and results go to _ex24/ (or $EX24_ROOT). Disk: the HDF encodings take ~3.4 GB per campaign (all
+#   libraries and sizes), hence the waves with cleanup (peak ~50 GB per 15-campaign wave; ~330 GB without cleanup).
+#   Each encode worker holds the graphs of one library (~5 GB for ZINC250k). Every result file is written atomically and
+#   finished campaigns/encodings are skipped, so any stage can be re-run to resume. The datasets (aqsoldb, zinc250k,
+#   freesolv, lipophilicity, beet, qm9_smiles, open_melting_point) come from chem_mat_data; featurize loads them one
+#   after the other. Left out on purpose: the stages morgan (added D=256 to libraries featurized before 2026-10-13)
+#   and objectives (rewrote the objective files for 100 campaigns and the zwitterion mask), and calibrate; with the
+#   current code, featurize writes the same files directly (verified on KCIST: re-featurizing reproduced the
+#   libraries byte-identically, and objectives --verify-against checked the initial designs of campaigns 0-24).
+#   Stripped from the runner: environment (OMP/MKL threads = --threads, TMPDIR on the node, PYTORCH_ALLOC_CONF=
+#   expandable_segments:True, PYTHONWARNINGS=ignore). The 6 run shards of a wave are independent (any number of shards
+#   works; --num-shards 6 is what ran).
+# @stage featurize
+python bo_benchmark.py featurize --workers 64
+# @stage tasks
+python bo_benchmark.py tasks
+python bo_benchmark.py tasks --campaigns 0-24 --output _ex24/tasks_w0.jsonl
+python bo_benchmark.py tasks --campaigns 25-39 --output _ex24/tasks_w1.jsonl
+python bo_benchmark.py tasks --campaigns 40-54 --output _ex24/tasks_w2.jsonl
+python bo_benchmark.py tasks --campaigns 55-69 --output _ex24/tasks_w3.jsonl
+python bo_benchmark.py tasks --campaigns 70-84 --output _ex24/tasks_w4.jsonl
+python bo_benchmark.py tasks --campaigns 85-99 --output _ex24/tasks_w5.jsonl
+# @stage encode_w0
+python bo_benchmark.py encode --campaigns 0-12 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 13-24 --workers 16 --threads 4
+# @stage run_w0
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 0 --num-shards 6 --tasks-file _ex24/tasks_w0.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 1 --num-shards 6 --tasks-file _ex24/tasks_w0.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 2 --num-shards 6 --tasks-file _ex24/tasks_w0.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 3 --num-shards 6 --tasks-file _ex24/tasks_w0.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 4 --num-shards 6 --tasks-file _ex24/tasks_w0.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 5 --num-shards 6 --tasks-file _ex24/tasks_w0.jsonl
+# @stage cleanup_w0
+python bo_benchmark.py cleanup --campaigns 0-24
+# @stage encode_w1
+python bo_benchmark.py encode --campaigns 25-27 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 28-30 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 31-33 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 34-36 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 37-39 --workers 16 --threads 4
+# @stage run_w1
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 0 --num-shards 6 --tasks-file _ex24/tasks_w1.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 1 --num-shards 6 --tasks-file _ex24/tasks_w1.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 2 --num-shards 6 --tasks-file _ex24/tasks_w1.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 3 --num-shards 6 --tasks-file _ex24/tasks_w1.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 4 --num-shards 6 --tasks-file _ex24/tasks_w1.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 5 --num-shards 6 --tasks-file _ex24/tasks_w1.jsonl
+# @stage cleanup_w1
+python bo_benchmark.py cleanup --campaigns 25-39
+# @stage encode_w2
+python bo_benchmark.py encode --campaigns 40-42 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 43-45 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 46-48 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 49-51 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 52-54 --workers 16 --threads 4
+# @stage run_w2
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 0 --num-shards 6 --tasks-file _ex24/tasks_w2.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 1 --num-shards 6 --tasks-file _ex24/tasks_w2.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 2 --num-shards 6 --tasks-file _ex24/tasks_w2.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 3 --num-shards 6 --tasks-file _ex24/tasks_w2.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 4 --num-shards 6 --tasks-file _ex24/tasks_w2.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 5 --num-shards 6 --tasks-file _ex24/tasks_w2.jsonl
+# @stage cleanup_w2
+python bo_benchmark.py cleanup --campaigns 40-54
+# @stage encode_w3
+python bo_benchmark.py encode --campaigns 55-57 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 58-60 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 61-63 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 64-66 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 67-69 --workers 16 --threads 4
+# @stage run_w3
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 0 --num-shards 6 --tasks-file _ex24/tasks_w3.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 1 --num-shards 6 --tasks-file _ex24/tasks_w3.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 2 --num-shards 6 --tasks-file _ex24/tasks_w3.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 3 --num-shards 6 --tasks-file _ex24/tasks_w3.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 4 --num-shards 6 --tasks-file _ex24/tasks_w3.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 5 --num-shards 6 --tasks-file _ex24/tasks_w3.jsonl
+# @stage cleanup_w3
+python bo_benchmark.py cleanup --campaigns 55-69
+# @stage encode_w4
+python bo_benchmark.py encode --campaigns 70-72 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 73-75 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 76-78 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 79-81 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 82-84 --workers 16 --threads 4
+# @stage run_w4
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 0 --num-shards 6 --tasks-file _ex24/tasks_w4.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 1 --num-shards 6 --tasks-file _ex24/tasks_w4.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 2 --num-shards 6 --tasks-file _ex24/tasks_w4.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 3 --num-shards 6 --tasks-file _ex24/tasks_w4.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 4 --num-shards 6 --tasks-file _ex24/tasks_w4.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 5 --num-shards 6 --tasks-file _ex24/tasks_w4.jsonl
+# @stage cleanup_w4
+python bo_benchmark.py cleanup --campaigns 70-84
+# @stage encode_w5
+python bo_benchmark.py encode --campaigns 85-87 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 88-90 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 91-93 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 94-96 --workers 16 --threads 4
+python bo_benchmark.py encode --campaigns 97-99 --workers 16 --threads 4
+# @stage run_w5
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 0 --num-shards 6 --tasks-file _ex24/tasks_w5.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 1 --num-shards 6 --tasks-file _ex24/tasks_w5.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 2 --num-shards 6 --tasks-file _ex24/tasks_w5.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 3 --num-shards 6 --tasks-file _ex24/tasks_w5.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 4 --num-shards 6 --tasks-file _ex24/tasks_w5.jsonl
+python bo_benchmark.py run --workers 24 --threads 1 --gpus -1 --shard 5 --num-shards 6 --tasks-file _ex24/tasks_w5.jsonl
+# @stage cleanup_w5
+python bo_benchmark.py cleanup --campaigns 85-99
+# @stage collect
+python bo_benchmark.py collect

@@ -1,0 +1,106 @@
+# ex_17 -- exact graph edit distance (Supplementary Section S9.2, Supplementary Figure S6, Supplementary Figure S2b)
+# Paper: SI Section S9.2 and Supplementary Figure S6 (figure_si_ged_exact_random.pdf: random pairs of QM9 and of
+#   ZINC250k molecules with <= 12 heavy atoms, GED-uniform subsets, Pearson r vs D for Morgan, HDF and HDF without
+#   size/diameter); the ZINC250k panel is repeated as Supplementary Figure S2b; the S9.2 sentence on all random pairs
+#   (no subsampling) and on Spearman comes from ex_17_unit. Since 2026-10-21 the SI shows no near pairs (no Figure
+#   S7 / panel S2c any more), but stage 2 and the figure script still need the near-pair chunks.
+# Source: graph_hdc revision/consolidated. Stage pairs = the used job scripts _ex17/jobs/ex_17__<set>__chunk_*.sh of
+#   the main checkout (generator _slurm_ex_17.py; local SLURM jobs 3955-4011, 2026-10-08; 57 archives
+#   results/ged_exact_pairs/ex_17__*). Stage correlation = ged_exact_correlation.py as run on 2026-10-08 (prefix
+#   ex_17, _ex17/jobs/ex_17__stage2_correlation.sbatch, original codebooks) and on 2026-10-09 (prefix ex_17_unit,
+#   unit-modulus codebooks; parameters from its experiment_meta.json, all other values are the module defaults).
+# Runs: pairs 57 (QM9 random 5 chunks, QM9 near 2, ZINC250k random 40, ZINC250k near 10); correlation 2
+# Protocol: molecule pools = QM9 (<= 9 heavy atoms) and the 2,196 ZINC250k molecules with <= 12 heavy atoms
+#   (connected, >= 2 heavy atoms); PAIR_SEED 0; random pairs: 10,000 (QM9) and 2,000 (ZINC250k); near pairs: networkx
+#   search with UPPER_BOUND 4 over 40,000 (QM9) and 220,000 (ZINC250k) random pairs (-> 1,018 and 695 near pairs).
+#   Exact unit-cost GED (networkx branch-and-bound: optimize_edit_paths for random pairs, graph_edit_distance with
+#   upper_bound for the near screen; nodes = element, edges = bond type with aromatic as its own type, implicit H), TIMEOUT 600 s per pair, 7200 s for ZINC250k random pairs (1 unfinished pair,
+#   excluded). Stage 2: HDF depth 2 (BIDIRECTIONAL True, HYDROGEN_COUNT 'total'), 5 codebook seeds (HDF_SEEDS 1-5),
+#   Morgan radius 2, D = 32/128/512/2048, size/diameter bandwidths from the full datasets (QM9 9/8, ZINC250k 38/23),
+#   Pearson and Spearman with bootstrap intervals (2000 replicates; not reported in the SI).
+#   ex_17 (SPECTRUM 'gaussian') is not reported, but its archive is the one the analysis scripts look up
+#   (analyze_ex_17.latest_archive('ex_17')) and the source of the fixed GED-balanced subsets.
+# Analysis (in this order; the balanced subsets depend only on the GED values, so they are the same from either archive):
+#   1. python make_figure_ged_balanced_subset.py --subsets   (-> the fixed subsets
+#      _ex17/analysis/balanced_subset_{qm9_smiles,zinc250k}_{random,near}.csv: <= 100 pairs per GED value, seed 0, from
+#      the pairs of the ex_17 archive; --subsets is a capsule addition, in the development repository an earlier version
+#      of main() wrote them)
+#   2. python analyze_ex_22_ged.py --trim --subsets qm9_smiles:random --tag _trimmed_qm9_smiles
+#      python analyze_ex_22_ged.py --trim --subsets zinc250k:random --tag _trimmed_zinc250k
+#      python analyze_ex_22_ged.py --trim --subsets qm9_smiles:near zinc250k:near --tag _trimmed_near
+#      (-> _ex22/ged_arms_trimmed_*.csv, ged_morgan_trimmed_*.csv: HDF unit / unit without size+diameter (and the
+#      gaussian arms) for 5 seeds on the subsets, random pairs cut to GED 4-15 (QM9) and 7-16 (ZINC250k), GED 0 dropped)
+#   3. python make_figure_ged_balanced_subset.py   (-> figures/figure_si_ged_exact_random (Figure S6), *_near, and the
+#      response-figure variants ged_exact_{random,near}_balanced)
+#   4. Figure S2 (panel b from _ex22/ged_arms_trimmed_zinc250k.csv): python make_figure_ged.py, after ex_11_b (see ex_11_b.txt)
+#   All-pairs numbers (S9.2 text): results.csv / differences.csv of the ex_17_unit archive.
+# Cost: about 280 CPU-h (69 job-hours x 4 worker processes on euler, 2026-10-08): ZINC250k random 55.6 job-h (max 2.9 h
+#   per chunk of 50 pairs; one pair ran into the 2 h limit), ZINC250k near 10.3, QM9 random 2.6, QM9 near 0.7;
+#   8 GB per job. Stage 2: minutes per run (16 GB requested).
+# Notes: QM9 (qm9_smiles) and ZINC250k come from chem_mat_data; load each dataset once before running the chunks in
+#   parallel (the scheduler pre-loaded them so that no two jobs download the same file). Stage 2 raises if a chunk is
+#   missing or incomplete (ALLOW_INCOMPLETE False). Exact GED times depend on the CPU, so the set of finished pairs can
+#   differ on another machine (TIMEOUT). Stripped from the job scripts: cd, TMPDIR, OMP/MKL threads 1,
+#   CUDA_VISIBLE_DEVICES=; NUM_WORKERS 4 = worker processes per run (4 CPUs). The ex_17 line adds --SPECTRUM="'gaussian'",
+#   which did not exist on 2026-10-08 (it was the only encoder then); the capsule default is 'unit'.
+# @stage pairs
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'qm9_smiles'" --MAX_HEAVY_ATOMS="9" --PAIR_SET="'random'" --NUM_PAIRS="10000" --PAIR_SEED="0" --NUM_CHUNKS="5" --CHUNK_INDEX="0" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'qm9_smiles'" --MAX_HEAVY_ATOMS="9" --PAIR_SET="'random'" --NUM_PAIRS="10000" --PAIR_SEED="0" --NUM_CHUNKS="5" --CHUNK_INDEX="1" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'qm9_smiles'" --MAX_HEAVY_ATOMS="9" --PAIR_SET="'random'" --NUM_PAIRS="10000" --PAIR_SEED="0" --NUM_CHUNKS="5" --CHUNK_INDEX="2" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'qm9_smiles'" --MAX_HEAVY_ATOMS="9" --PAIR_SET="'random'" --NUM_PAIRS="10000" --PAIR_SEED="0" --NUM_CHUNKS="5" --CHUNK_INDEX="3" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'qm9_smiles'" --MAX_HEAVY_ATOMS="9" --PAIR_SET="'random'" --NUM_PAIRS="10000" --PAIR_SEED="0" --NUM_CHUNKS="5" --CHUNK_INDEX="4" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'qm9_smiles'" --MAX_HEAVY_ATOMS="9" --PAIR_SET="'near'" --NUM_PAIRS="40000" --PAIR_SEED="0" --NUM_CHUNKS="2" --CHUNK_INDEX="0" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'qm9_smiles'" --MAX_HEAVY_ATOMS="9" --PAIR_SET="'near'" --NUM_PAIRS="40000" --PAIR_SEED="0" --NUM_CHUNKS="2" --CHUNK_INDEX="1" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="0" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="1" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="2" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="3" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="4" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="5" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="6" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="7" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="8" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="9" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="10" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="11" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="12" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="13" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="14" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="15" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="16" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="17" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="18" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="19" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="20" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="21" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="22" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="23" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="24" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="25" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="26" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="27" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="28" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="29" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="30" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="31" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="32" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="33" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="34" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="35" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="36" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="37" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="38" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'random'" --NUM_PAIRS="2000" --PAIR_SEED="0" --NUM_CHUNKS="40" --CHUNK_INDEX="39" --TIMEOUT="7200.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'near'" --NUM_PAIRS="220000" --PAIR_SEED="0" --NUM_CHUNKS="10" --CHUNK_INDEX="0" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'near'" --NUM_PAIRS="220000" --PAIR_SEED="0" --NUM_CHUNKS="10" --CHUNK_INDEX="1" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'near'" --NUM_PAIRS="220000" --PAIR_SEED="0" --NUM_CHUNKS="10" --CHUNK_INDEX="2" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'near'" --NUM_PAIRS="220000" --PAIR_SEED="0" --NUM_CHUNKS="10" --CHUNK_INDEX="3" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'near'" --NUM_PAIRS="220000" --PAIR_SEED="0" --NUM_CHUNKS="10" --CHUNK_INDEX="4" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'near'" --NUM_PAIRS="220000" --PAIR_SEED="0" --NUM_CHUNKS="10" --CHUNK_INDEX="5" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'near'" --NUM_PAIRS="220000" --PAIR_SEED="0" --NUM_CHUNKS="10" --CHUNK_INDEX="6" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'near'" --NUM_PAIRS="220000" --PAIR_SEED="0" --NUM_CHUNKS="10" --CHUNK_INDEX="7" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'near'" --NUM_PAIRS="220000" --PAIR_SEED="0" --NUM_CHUNKS="10" --CHUNK_INDEX="8" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+python ged_exact_pairs.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --DATASET_NAME="'zinc250k'" --MAX_HEAVY_ATOMS="12" --PAIR_SET="'near'" --NUM_PAIRS="220000" --PAIR_SEED="0" --NUM_CHUNKS="10" --CHUNK_INDEX="9" --TIMEOUT="600.0" --UPPER_BOUND="4.0" --NUM_WORKERS="4"
+# @stage correlation
+python ged_exact_correlation.py --__DEBUG__="False" --__PREFIX__="'ex_17'" --PAIRS_PREFIX="'ex_17'" --SPECTRUM="'gaussian'"
+python ged_exact_correlation.py --__DEBUG__="False" --__PREFIX__="'ex_17_unit'" --PAIRS_PREFIX="'ex_17'" --SPECTRUM="'unit'"

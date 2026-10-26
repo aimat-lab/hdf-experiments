@@ -1,0 +1,22 @@
+# ex_23 -- training-free decoding of the atom composition (Supplementary Section S12, Figure S7, Table S12)
+# Paper: SI Section S12 "Recovery of the atom composition from HDF embeddings", Supplementary Figure S7
+#   (figure_si_decode.pdf) and Supplementary Table S12 (tabulars/decode_composition.tex).
+# Source: graph_hdc revision/consolidated, decode_composition.py (no scheduler; the two runs were started by hand on
+#   euler, 2026-10-12). Lines reconstructed from the experiment_meta.json of the archives
+#   results/decode_composition/ex_23__12_10_2026__14_07__dsgG (QM9) and ex_23__12_10_2026__14_07__HhSR (ZINC250k):
+#   every parameter except MOLECULE_SETS equals the module default (verified), so only the prefix and the molecule set
+#   are passed. The smoke run ex_23_smoke is left out.
+# Runs: 2 (one per molecule set)
+# Protocol: 1,000 random molecules per set (NUM_MOLECULES, SAMPLE_SEED 1) of QM9 and ZINC250k; size/diameter bandwidths
+#   from the full datasets (QM9 9/8, ZINC250k 38/23); HDF standard configuration (SPECTRUM 'unit', BIDIRECTIONAL True,
+#   HYDROGEN_COUNT 'total'); D = 256-8192 at depth 2 and depths 1-3 at D = 2048; codebook seeds 1-3. Decoded vectors: the
+#   final HDF vector, the vector without size/diameter, the layer-0 readout; candidates = all 41 elements x degree 0-4 x
+#   H 0-4 (1,025 atom types), top-64 shortlist + NNLS + integer scaling (graph_hdc.special.composition); metrics = exact
+#   atom count, exact atom-type set, exact counts, share of correctly typed atoms.
+# Analysis: python analyze_ex_23.py   (-> _ex23/figure_si_decode.pdf|png (Figure S7), decode_composition_table.tex (Table
+#             S12), summary.csv; collects results.csv of all archives with prefix ex_23)
+# Cost: about 3 CPU-h (2 threads, under nice): QM9 0.5 h, ZINC250k 1.0 h.
+# Notes: QM9 (qm9_smiles) and ZINC250k come from chem_mat_data. The two lines are independent.
+# @stage runs
+python decode_composition.py --__DEBUG__="False" --__PREFIX__="'ex_23'" --MOLECULE_SETS="[('qm9_smiles', 9, 8)]"
+python decode_composition.py --__DEBUG__="False" --__PREFIX__="'ex_23'" --MOLECULE_SETS="[('zinc250k', 38, 23)]"

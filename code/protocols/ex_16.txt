@@ -1,0 +1,34 @@
+# ex_16 -- 1-WL collision analysis (reviewer comment R3.2), unit-modulus round
+# Paper: no SI section. The manuscript change for R3.2 is the (theoretical) expressivity paragraph in the Methods; the
+#        collision rates and the figure (revision/response_figures/collisions.png) are in the R3.2 response.
+# Source: job scripts of the used run, graph_hdc worktree ex16unit (branch revision/ex16-unitspec, commit 91b926e),
+#         _ex16/jobs/ex_16_collisions_unitspec__*.sh: python lines only (env exports, cd, TMPDIR, git/echo lines
+#         stripped); identical to the output of _slurm_ex_16.py command() (checked). Prefix ex_16_collisions_unitspec.
+#         Earlier rounds ex_16_collisions (implicit H) and ex_16_collisions_totalh (gaussian codebooks) are not included.
+# Runs: 14 (2 datasets x 7 embedding sizes)
+# Protocol: QM9 (qm9_smiles) and ZINC250k, distinct molecules = canonical SMILES without stereo; fraction of molecules
+#   whose representation equals that of at least one other molecule. HDF L=2 (unit codebooks, total H; identical up
+#   to floating-point precision), binary Morgan r2 folded to D = 32 ... 2048, and 1-WL with 2 iterations (size-free,
+#   computed in every run; the analysis takes it from any run of a dataset).
+# Analysis: python analyze_ex_16.py   (default prefix ex_16_collisions_unitspec; -> _ex16/collisions_ex_16_collisions_unitspec.md
+#   and .pdf/.png = the response figure collisions.png)
+# Cost: CPU only (2 threads, 4 CPUs per run, 16 GB QM9 / 24 GB ZINC); 5.6 CPU-job-h in total, longest run 1.7 h.
+# Notes: no external data besides chem_mat_data (qm9_smiles, zinc250k). The used run gave each job a private TMPDIR
+#   (chem_mat_data rewrites a metadata file in the temp folder): pre-load both datasets or give each line its own TMPDIR
+#   when running lines in parallel. The response figure of 2026-10-21 was drawn with a 3-line uncommitted edit of
+#   analyze_ex_16.py in the ex16unit worktree (y-axis label on every panel); the capsule copy labels only the first panel.
+# @stage main
+python molecule_collisions.py --__DEBUG__="False" --__PREFIX__="'ex_16_collisions_unitspec'" --DATASET_NAME="'qm9_smiles'" --EMBEDDING_SIZES="[32]" --HYDROGEN_COUNT="'total'" --SPECTRUM="'unit'"
+python molecule_collisions.py --__DEBUG__="False" --__PREFIX__="'ex_16_collisions_unitspec'" --DATASET_NAME="'qm9_smiles'" --EMBEDDING_SIZES="[64]" --HYDROGEN_COUNT="'total'" --SPECTRUM="'unit'"
+python molecule_collisions.py --__DEBUG__="False" --__PREFIX__="'ex_16_collisions_unitspec'" --DATASET_NAME="'qm9_smiles'" --EMBEDDING_SIZES="[128]" --HYDROGEN_COUNT="'total'" --SPECTRUM="'unit'"
+python molecule_collisions.py --__DEBUG__="False" --__PREFIX__="'ex_16_collisions_unitspec'" --DATASET_NAME="'qm9_smiles'" --EMBEDDING_SIZES="[256]" --HYDROGEN_COUNT="'total'" --SPECTRUM="'unit'"
+python molecule_collisions.py --__DEBUG__="False" --__PREFIX__="'ex_16_collisions_unitspec'" --DATASET_NAME="'qm9_smiles'" --EMBEDDING_SIZES="[512]" --HYDROGEN_COUNT="'total'" --SPECTRUM="'unit'"
+python molecule_collisions.py --__DEBUG__="False" --__PREFIX__="'ex_16_collisions_unitspec'" --DATASET_NAME="'qm9_smiles'" --EMBEDDING_SIZES="[1024]" --HYDROGEN_COUNT="'total'" --SPECTRUM="'unit'"
+python molecule_collisions.py --__DEBUG__="False" --__PREFIX__="'ex_16_collisions_unitspec'" --DATASET_NAME="'qm9_smiles'" --EMBEDDING_SIZES="[2048]" --HYDROGEN_COUNT="'total'" --SPECTRUM="'unit'"
+python molecule_collisions.py --__DEBUG__="False" --__PREFIX__="'ex_16_collisions_unitspec'" --DATASET_NAME="'zinc250k'" --EMBEDDING_SIZES="[32]" --HYDROGEN_COUNT="'total'" --SPECTRUM="'unit'"
+python molecule_collisions.py --__DEBUG__="False" --__PREFIX__="'ex_16_collisions_unitspec'" --DATASET_NAME="'zinc250k'" --EMBEDDING_SIZES="[64]" --HYDROGEN_COUNT="'total'" --SPECTRUM="'unit'"
+python molecule_collisions.py --__DEBUG__="False" --__PREFIX__="'ex_16_collisions_unitspec'" --DATASET_NAME="'zinc250k'" --EMBEDDING_SIZES="[128]" --HYDROGEN_COUNT="'total'" --SPECTRUM="'unit'"
+python molecule_collisions.py --__DEBUG__="False" --__PREFIX__="'ex_16_collisions_unitspec'" --DATASET_NAME="'zinc250k'" --EMBEDDING_SIZES="[256]" --HYDROGEN_COUNT="'total'" --SPECTRUM="'unit'"
+python molecule_collisions.py --__DEBUG__="False" --__PREFIX__="'ex_16_collisions_unitspec'" --DATASET_NAME="'zinc250k'" --EMBEDDING_SIZES="[512]" --HYDROGEN_COUNT="'total'" --SPECTRUM="'unit'"
+python molecule_collisions.py --__DEBUG__="False" --__PREFIX__="'ex_16_collisions_unitspec'" --DATASET_NAME="'zinc250k'" --EMBEDDING_SIZES="[1024]" --HYDROGEN_COUNT="'total'" --SPECTRUM="'unit'"
+python molecule_collisions.py --__DEBUG__="False" --__PREFIX__="'ex_16_collisions_unitspec'" --DATASET_NAME="'zinc250k'" --EMBEDDING_SIZES="[2048]" --HYDROGEN_COUNT="'total'" --SPECTRUM="'unit'"
