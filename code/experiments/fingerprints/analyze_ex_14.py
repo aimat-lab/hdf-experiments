@@ -1,0 +1,381 @@
+"""
+Analysis for Experiment 14 (HDF vs. graph neural networks, reviewer comment R2.1).
+
+Collects the ex_14 archives of the three experiment modules and writes to ``_ex14/``:
+
+* ``results_<prefix>.csv``      one row per (variant, model, dataset, seed) with test MAE / R2 and timings
+* ``gnn_comparison_mlp_<prefix>.tex``  SI table: HDF + MLP vs. random-init GNN + MLP vs. trained GNN (end-to-end)
+* ``gnn_comparison_knn_<prefix>.tex``  SI table: HDF + KNN vs. random-init GNN + KNN
+* ``gnn_comparison_cost.tex``    median featurization / training wall time per variant and dataset
+* ``gnn_convergence.txt``        best epoch vs. stop epoch of the trained GNNs (early-stopping sanity check)
+
+Significance: paired two-sided Wilcoxon signed-rank tests over the seeds (HDF vs. each other column of the
+same table, paired by SEED so that both sides share the identical train/val/test split), Holm-corrected
+within each dataset row: the comparisons against HDF on one dataset form one family. (A correction over
+all tests of a table can never reach significance with 10 seeds: the smallest possible two-sided p is
+2/2^10 ~ 0.002, and the MLP table has 36 tests with GIN and GATv2.) Marks: a triangle pointing down / up
+for a lower / higher MAE than HDF, filled for p<0.05 (corrected) and hollow otherwise.
+
+The two comparison tables are the tabulars of the SI (mean over the seeds with the standard deviation set
+below in gray, best mean per target in bold) and report the architectures in TABLE_ARCHS.
+
+Only archives of the current round count (``is_current`` of _slurm_ex_14.py: bidirectional HDF with unit-modulus
+codebooks, total hydrogen counts for HDF and the GNN inputs, cosine learning-rate decay for the trained GNNs); the
+archives of the earlier rounds under the same prefix are skipped, and their number is printed.
+
+Usage:
+    python analyze_ex_14.py                 # prefix ex_14_gnn
+    python analyze_ex_14.py ex_14_smoke     # any other archive prefix, e.g. the smoke runs
+    python analyze_ex_14.py ex_14_gnn --csv _ex14/results_ex_14_gnn.csv
+                                            # rebuild the tables from a results CSV, without the archives
+"""
+import os
+import sys
+import csv
+import json
+import glob
+from collections import defaultdict
+
+import numpy as np
+from scipy.stats import wilcoxon
+
+from _slurm_ex_14 import is_current
+
+PATH = os.path.dirname(os.path.abspath(__file__))
+RESULTS = os.path.join(PATH, 'results')
+OUT = os.path.join(PATH, '_ex14')
+
+# GCN was part of the earlier rounds only (dropped from the paper and from the 2026-10-08 re-run)
+ARCHS = ['gin', 'gatv2']
+ARCH_LABEL = {'gcn': 'GCN', 'gin': 'GIN', 'gatv2': 'GATv2'}
+DATASET_ORDER = [
+    'freesolv_hfe', 'aqsoldb_logs', 'lipophilicity_logD', 'bace_ic50', 'hopv15_pce',
+    'compas_gap', 'qm9_gap', 'qm9_energy', 'qm9_zpve',
+]
+DATASET_LABEL = {
+    'freesolv_hfe': 'FreeSolv', 'aqsoldb_logs': 'AqSolDB', 'lipophilicity_logD': 'Lipophilicity',
+    'bace_ic50': 'BACE', 'hopv15_pce': 'HOPV15 (PCE)', 'compas_gap': 'COMPAS-3X (gap)',
+    'qm9_gap': 'QM9 (gap)', 'qm9_energy': r'QM9 ($U_0$)', 'qm9_zpve': 'QM9 (ZPVE)',
+}
+# Rows of the SI tables: dataset name (printed on the first row of a dataset), quantity, unit and the factor
+# that converts the raw MAE into that unit. The raw QM9 targets are in hartree, COMPAS-3X in eV. All cells are
+# printed with TABLE_DECIMALS decimals, so the small energy errors are given in millihartree: the QM9 gap and
+# ZPVE scaled from Ha, the COMPAS-3X gap converted from eV. U0 stays in Ha (its errors are ~600x larger).
+HARTREE_EV = 27.211386245988   # CODATA 2018
+TABLE_DECIMALS = 3
+ROW_META = {
+    'freesolv_hfe': ('FreeSolv', r'$\Delta G$', 'kcal/mol', 1.0),
+    'aqsoldb_logs': ('AqSolDB', 'logS', r'log\,M', 1.0),
+    'lipophilicity_logD': ('Lipophilicity', 'logD', '', 1.0),
+    'bace_ic50': ('BACE', 'IC50', 'pIC50', 1.0),
+    'hopv15_pce': ('HOPV15', 'PCE', r'\%', 1.0),
+    'compas_gap': ('COMPAS-3X', 'Gap', 'mHa', 1000.0 / HARTREE_EV),
+    'qm9_gap': ('QM9', 'Gap', 'mHa', 1000.0),
+    'qm9_energy': ('QM9', '$U_0$', 'Ha', 1.0),
+    'qm9_zpve': ('QM9', 'ZPVE', 'mHa', 1000.0),
+}
+# architectures in the SI tables
+TABLE_ARCHS = ['gin', 'gatv2']
+
+
+def iter_archives(prefix: str, skipped: dict = None):
+    """
+    Yield (module, meta, params, data) for every completed archive of the current round whose __PREFIX__
+    equals ``prefix``. If ``skipped`` is a dict, it counts the archives of earlier rounds per module.
+    """
+    skipped = defaultdict(int) if skipped is None else skipped
+    pattern = os.path.join(RESULTS, 'predict_molecules__*', '*', 'experiment_meta.json')
+    for meta_path in glob.glob(pattern):
+        module = os.path.basename(os.path.dirname(os.path.dirname(meta_path)))
+        try:
+            meta = json.load(open(meta_path))
+        except Exception:
+            continue
+        params = {k: v.get('value') for k, v in meta.get('parameters', {}).items() if isinstance(v, dict)}
+        # a killed or timed-out run keeps status 'running' (and has_error False), so require 'done'
+        if params.get('__PREFIX__') != prefix or meta.get('status') != 'done' or meta.get('has_error'):
+            continue
+        # only the current round (see _slurm_ex_14.py): the earlier rounds under the same prefix (early stopping;
+        # one-directional HDF, implicit hydrogen counts, constant learning rate, GCN) are ignored
+        if not is_current(module.replace('predict_molecules__', ''), params):
+            skipped[module] = skipped.get(module, 0) + 1
+            continue
+        data_path = os.path.join(os.path.dirname(meta_path), 'experiment_data.json')
+        if not os.path.exists(data_path):
+            continue
+        try:
+            data = json.load(open(data_path))
+        except Exception:
+            continue
+        yield module, meta, params, data
+
+
+def collect(prefix: str, splits: dict = None) -> list:
+    """
+    Flatten the archives into records ``{variant, arch, model, dataset, seed, mae, r2, ...}``.
+
+    variant is 'hdf', 'random' or 'trained'; model is the downstream model ('neural_net2', 'k_neighbors')
+    or 'end2end' for the trained GNN. Duplicates of (variant, arch, model, dataset, seed), e.g. from a
+    retried run, keep the newest archive. If ``splits`` is a dict, it receives the (train, val, test)
+    indices of every kept run under the key (variant, arch, dataset, seed).
+    """
+    records, skipped = {}, {}
+    # oldest first, so that a newer archive of the same run (e.g. a retry) overwrites an older one
+    archives = sorted(iter_archives(prefix, skipped), key=lambda t: t[1].get('start_time') or 0)
+    if skipped:
+        print('skipped archives of earlier rounds: ' + ', '.join(f'{m} {n}' for m, n in sorted(skipped.items())))
+    for module, meta, params, data in archives:
+        metrics = data.get('metrics', {})
+        if module == 'predict_molecules__hdc':
+            variant, arch, models = 'hdf', '', ['neural_net2', 'k_neighbors']
+        elif module == 'predict_molecules__gnn_random':
+            variant, arch, models = 'random', params['GNN_ARCH'], ['neural_net2', 'k_neighbors']
+        elif module == 'predict_molecules__gnn':
+            variant, arch = 'trained', params['MODELS'][0]
+            models = [arch]
+        else:
+            continue
+        for model in models:
+            key = f'test_{model}'
+            if key not in metrics:
+                continue
+            rec = {
+                'variant': variant, 'arch': arch,
+                'model': 'end2end' if variant == 'trained' else model,
+                'dataset': params['NOTE'], 'seed': params['SEED'],
+                'mae': metrics[key]['mae'], 'r2': metrics[key]['r2'],
+                'process_time': data.get('process_time'),
+                # pure encoding time (HDF: only set on the cache-building run of a dataset/seed)
+                'encode_time': data.get('encode_time'),
+                'train_time': data.get('train_time', {}).get(model),
+                'fit_time': data.get('fit_time', {}).get(model),
+                'best_epoch': data.get('best_epoch', {}).get(model),
+                'epochs': data.get('epochs', {}).get(model),
+            }
+            k = (rec['variant'], rec['arch'], rec['model'], rec['dataset'], rec['seed'])
+            records[k] = rec
+        if splits is not None:
+            indices = data.get('indices', {})
+            splits[(variant, arch, params['NOTE'], params['SEED'])] = tuple(
+                tuple(indices.get(part) or ()) for part in ('train', 'val', 'test'))
+    return list(records.values())
+
+
+def check_splits(splits: dict) -> int:
+    """
+    Number of (dataset, seed) pairs whose runs used different (or unrecorded) splits. The paired tests need
+    HDF and every GNN variant on the same split, which they all get from the cached dataset order (load__).
+    """
+    by_pair = {}
+    for (variant, arch, dataset, seed), split in splits.items():
+        by_pair.setdefault((dataset, seed), {})[f'{variant}{"_" + arch if arch else ""}'] = split
+    mismatches = 0
+    for (dataset, seed), runs in sorted(by_pair.items()):
+        missing = sorted(name for name, split in runs.items() if not split[2])
+        if missing or len(set(runs.values())) > 1:
+            mismatches += 1
+            groups = {}
+            for name, split in runs.items():
+                groups.setdefault(split, []).append(name)
+            print(f'SPLIT MISMATCH: {dataset} seed {seed}: ' + ' | '.join(sorted(', '.join(sorted(g)) for g in groups.values()))
+                  + (f' (no recorded test indices: {missing})' if missing else ''))
+    return mismatches
+
+
+def load_csv(path: str) -> list:
+    """Records as written to ``results_<prefix>.csv``, so that the tables can be rebuilt without the archives."""
+    def number(value, cast=float):
+        return None if value in ('', None) else cast(float(value))
+    records = []
+    with open(path) as f:
+        for row in csv.DictReader(f):
+            records.append({**row, 'seed': int(row['seed']), 'mae': float(row['mae']), 'r2': number(row['r2']),
+                            'process_time': number(row['process_time']), 'encode_time': number(row['encode_time']),
+                            'train_time': number(row['train_time']), 'fit_time': number(row['fit_time']),
+                            'best_epoch': number(row['best_epoch'], int), 'epochs': number(row['epochs'], int)})
+    return records
+
+
+def by_seed(records: list, variant: str, arch: str, model: str, dataset: str) -> dict:
+    return {r['seed']: r['mae'] for r in records
+            if (r['variant'], r['arch'], r['model'], r['dataset']) == (variant, arch, model, dataset)}
+
+
+def holm(pvalues: list) -> list:
+    """Holm-Bonferroni adjusted p-values (None entries are passed through)."""
+    idx = [i for i, p in enumerate(pvalues) if p is not None]
+    order = sorted(idx, key=lambda i: pvalues[i])
+    adjusted = list(pvalues)
+    running = 0.0
+    for rank, i in enumerate(order):
+        running = max(running, min(1.0, (len(order) - rank) * pvalues[i]))
+        adjusted[i] = running
+    return adjusted
+
+
+def si_cell(values: list, bold: bool, mark: str = None, significant: bool = False) -> str:
+    """
+    Mean with the standard deviation set below it in gray, as in the other SI tables, with TABLE_DECIMALS
+    decimals (the units in ROW_META are chosen such that this keeps at least three significant digits).
+    ``mark`` 'down' / 'up' adds a triangle for a lower / higher MAE than the reference, filled if the
+    difference is ``significant`` and hollow otherwise. The triangle macros (\\trilowsig, \\trihighsig,
+    \\trilow, \\trihigh) and their colors are defined in the preamble of supplementary.tex.
+    """
+    mean, std = np.mean(values), np.std(values)
+    digits = TABLE_DECIMALS
+    text = f'{mean:.{digits}f}'
+    if bold:
+        text = f'\\mathbf{{{text}}}'
+    if mark:
+        macro = {('down', True): 'trilowsig', ('up', True): 'trihighsig',
+                 ('down', False): 'trilow', ('up', False): 'trihigh'}[(mark, significant)]
+        text += f'^{{\\{macro}}}'
+    return f'$\\underset{{\\color{{darkgray}} \\pm{std:.{digits}f}}}{{{text}}}$'
+
+
+def table(records: list, columns: list, header: list, note: str) -> str:
+    """
+    SI tabular with one row per target and ``columns`` = [(label, variant, arch, model), ...]. ``header``
+    holds the header lines between \toprule and \midrule. The first column is the reference (HDF), against
+    which all others are tested, Holm-corrected within the row. Every other cell carries a triangle that points
+    down for a lower and up for a higher mean MAE than the reference, filled if p < 0.05 and hollow otherwise.
+    The best mean MAE per row is bold.
+    """
+    lines = ['\\begin{tabular}{ll' + 'c' * len(columns) + '}', '\\toprule', *header, '\\midrule']
+    previous = None
+    for dataset in DATASET_ORDER:
+        name, quantity, unit, scale = ROW_META[dataset]
+        # unit conversion of the MAE (does not change the paired tests, which only use the ranks)
+        cells = [{s: scale * v for s, v in by_seed(records, v_, a, m, dataset).items()} for _, v_, a, m in columns]
+        if not all(cells):
+            continue
+        ref = cells[0]
+        pvals = []
+        for cell in cells[1:]:
+            seeds = sorted(set(ref) & set(cell))
+            diffs = [ref[s] - cell[s] for s in seeds]
+            if len(seeds) >= 5 and any(d != 0 for d in diffs):
+                pvals.append(wilcoxon([ref[s] for s in seeds], [cell[s] for s in seeds]).pvalue)
+            else:
+                pvals.append(None)
+        # one family per target (see the module docstring for why not per table)
+        pvals = holm(pvals)
+        means = [np.mean(list(c.values())) for c in cells]
+        best = int(np.argmin(means))
+
+        out = [name if name != previous else '', quantity + (f' \\qunit{{{unit}}}' if unit else '')]
+        previous = name
+        for i, cell in enumerate(cells):
+            significant = i > 0 and pvals[i - 1] is not None and pvals[i - 1] < 0.05
+            mark = ('down' if means[i] < means[0] else 'up') if i > 0 else None
+            text = si_cell(list(cell.values()), bold=(i == best), mark=mark, significant=significant)
+            if len(cell) < 10:
+                text += f' ({len(cell)})'   # flags incomplete cells (fewer seeds than planned)
+            out.append(text)
+        lines.append(' &\n'.join(out) + ' \\\\\n')
+    lines += ['\\bottomrule', '\\end{tabular}', f'% {note}']
+    return '\n'.join(lines) + '\n'
+
+
+def cost_table(records: list) -> str:
+    columns = [('HDF', 'hdf', '', 'neural_net2')]
+    columns += [(f'Random {ARCH_LABEL[a]}', 'random', a, 'neural_net2') for a in ARCHS]
+    columns += [(f'Trained {ARCH_LABEL[a]}', 'trained', a, 'end2end') for a in ARCHS]
+    lines = [
+        '\\begin{tabular}{l' + 'c' * len(columns) + '}',
+        '\\toprule',
+        'Dataset & ' + ' & '.join(label for label, *_ in columns) + ' \\\\',
+        '\\midrule',
+    ]
+    for dataset in DATASET_ORDER:
+        out = [DATASET_LABEL.get(dataset, dataset)]
+        found = False
+        for _, v, a, m in columns:
+            recs = [r for r in records if (r['variant'], r['arch'], r['model'], r['dataset']) == (v, a, m, dataset)]
+            # encoding time for the fixed representations, training time for the end-to-end GNNs
+            times = [r['train_time'] if v == 'trained' else r['encode_time'] for r in recs]
+            times = [t for t in times if t is not None]
+            found |= bool(times)
+            out.append(f'{np.median(times):.0f}' if times else '--')
+        if found:
+            lines.append(' & '.join(out) + ' \\\\')
+    lines += ['\\bottomrule', '\\end{tabular}',
+              '% median wall time in seconds: featurization + encoding of the whole dataset (HDF on CPU, '
+              'random GNN on GPU; HDF only from the cache-building run of a dataset/seed, so QM9 is '
+              'reported under the gap target) / training until the best epoch (trained GNN, GPU)']
+    return '\n'.join(lines) + '\n'
+
+
+def convergence(records: list) -> str:
+    lines = ['dataset\tarch\tn\tmedian_best_epoch\tmax_best_epoch\tmedian_stop_epoch\tmax_stop_epoch\tbest_after_900']
+    for dataset in DATASET_ORDER:
+        for a in ARCHS:
+            recs = [r for r in records if r['variant'] == 'trained' and r['arch'] == a and r['dataset'] == dataset
+                    and r['best_epoch'] is not None]
+            if not recs:
+                continue
+            best = [r['best_epoch'] for r in recs]
+            stop = [r['epochs'] for r in recs]
+            # best epoch in the last 10% of training: with a constant learning rate a sign that the run might still
+            # have been improving; with the cosine decay (current round) expected, as the rate is smallest there
+            hit_cap = sum(1 for b in best if b >= 900)
+            lines.append(f'{dataset}\t{a}\t{len(recs)}\t{np.median(best):.0f}\t{max(best)}\t'
+                         f'{np.median(stop):.0f}\t{max(stop)}\t{hit_cap}')
+    return '\n'.join(lines) + '\n'
+
+
+def main(prefix: str, csv_path: str = None):
+    os.makedirs(OUT, exist_ok=True)
+    if csv_path:
+        records = load_csv(csv_path)
+        print(f'loaded {len(records)} records from {csv_path}')
+    else:
+        splits = {}
+        records = collect(prefix, splits)
+        print(f'collected {len(records)} records for prefix "{prefix}"')
+        print(f'split check: {check_splits(splits)} mismatching (dataset, seed) pairs')
+    if not records:
+        return
+
+    if not csv_path:
+        with open(os.path.join(OUT, f'results_{prefix}.csv'), 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=list(records[0].keys()))
+            writer.writeheader()
+            writer.writerows(sorted(records, key=lambda r: (r['dataset'], r['variant'], r['arch'], r['model'], r['seed'])))
+
+    labels = [ARCH_LABEL[a] for a in TABLE_ARCHS]
+    n = len(TABLE_ARCHS)
+    mlp_columns = [('HDF', 'hdf', '', 'neural_net2')]
+    mlp_columns += [(f'Random {ARCH_LABEL[a]}', 'random', a, 'neural_net2') for a in TABLE_ARCHS]
+    mlp_columns += [(ARCH_LABEL[a], 'trained', a, 'end2end') for a in TABLE_ARCHS]
+    # HDF stands on its own; the banners group the random (untrained) and the trained GNN columns
+    mlp_header = [
+        f' & & & \\multicolumn{{{n}}}{{c}}{{Random Repr. + MLP}} & \\multicolumn{{{n}}}{{c}}{{Trained end-to-end}} \\\\',
+        f'\\cmidrule(lr){{4-{n + 3}}} \\cmidrule(lr){{{n + 4}-{2 * n + 3}}}',
+        'Dataset & Quantity & HDF & ' + ' & '.join(labels) + ' & ' + ' & '.join(labels) + ' \\\\',
+    ]
+    knn_columns = [('HDF', 'hdf', '', 'k_neighbors')]
+    knn_columns += [(f'Random {ARCH_LABEL[a]}', 'random', a, 'k_neighbors') for a in TABLE_ARCHS]
+    knn_header = ['Dataset & Quantity & HDF & ' + ' & '.join(f'Random {l}' for l in labels) + ' \\\\']
+
+    note = ('generated by analyze_ex_14.py; test MAE, mean (std below) over the seeds; bold = best mean per '
+            'target; triangle down/up = lower/higher MAE than HDF {}, filled if significant (paired Wilcoxon, '
+            'Holm-corrected within each target, p < 0.05), hollow otherwise')
+    outputs = {
+        f'gnn_comparison_mlp_{prefix}.tex': table(records, mlp_columns, mlp_header, note.format('+ MLP')),
+        f'gnn_comparison_knn_{prefix}.tex': table(records, knn_columns, knn_header, note.format('+ KNN')),
+        f'gnn_comparison_cost_{prefix}.tex': cost_table(records),
+        f'gnn_convergence_{prefix}.txt': convergence(records),
+    }
+    for name, content in outputs.items():
+        with open(os.path.join(OUT, name), 'w') as f:
+            f.write(content)
+        print(f'--- {name}\n{content}')
+
+
+if __name__ == '__main__':
+    args = [a for a in sys.argv[1:] if a != '--csv']
+    csv_path = sys.argv[sys.argv.index('--csv') + 1] if '--csv' in sys.argv else None
+    if csv_path:
+        args.remove(csv_path)
+    main(args[0] if args else 'ex_14_gnn', csv_path)
