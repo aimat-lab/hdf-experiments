@@ -27,9 +27,11 @@ subset. Right: Pearson r vs embedding size.
 The original-encoder correlations are cached in ``_ex17/analysis/balanced_subset_correlations.csv`` (delete it
 to recompute them; the figure only takes the numbers of available pairs from it).
 
+    python make_figure_ged_balanced_subset.py --subsets   # write the fixed subsets (before analyze_ex_22_ged.py)
     python make_figure_ged_balanced_subset.py
 """
 import os
+import sys
 
 import matplotlib
 matplotlib.use('Agg')
@@ -115,6 +117,19 @@ def correlations(pairs: pd.DataFrame) -> pd.DataFrame:
     os.makedirs(os.path.dirname(CACHE), exist_ok=True)
     table.to_csv(CACHE, index=False)
     return table
+
+
+def write_subsets(pairs: pd.DataFrame) -> None:
+    """Write the fixed GED-balanced subsets (the first part of correlations(), without the correlations of the
+    original encoder, which the figures no longer use). Capsule addition: in the development repository the subsets
+    were written by an earlier version of main()."""
+    for pair_set in ('random', 'near'):
+        for dataset, _ in DATASETS:
+            frame = pairs[(pairs['dataset'] == dataset) & (pairs['pair_set'] == pair_set)].reset_index(drop=True)
+            subset = balanced_subset(frame)
+            os.makedirs(os.path.dirname(SUBSETS), exist_ok=True)
+            subset.to_csv(SUBSETS.format(dataset=dataset, pair_set=pair_set), index=False)
+            print(f'{dataset} / {pair_set}: subset of {len(subset)} of {len(frame)} pairs')
 
 
 def load_subset(dataset: str, pair_set: str) -> pd.DataFrame:
@@ -233,6 +248,10 @@ def figure(pair_set: str, table: pd.DataFrame, si: bool = False):
 def main():
     archive = analyze_ex_17.latest_archive()
     pairs = pd.read_csv(os.path.join(archive, 'pairs_with_distances.csv'))
+    if '--subsets' in sys.argv:
+        # step 1 of the analysis of ex_17 (protocols/ex_17.txt): only write the subsets that analyze_ex_22_ged.py reads
+        write_subsets(pairs)
+        return
     table = current_correlations(pairs)
     for pair_set in ('random', 'near'):
         figure(pair_set, table)
