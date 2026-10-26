@@ -32,3 +32,7 @@ data/*
 # regenerable test outputs
 code/tests/artifacts/*
 !code/tests/artifacts/README.md
+
+# outputs of the analysis scripts, the BO benchmark and run_protocol.py
+code/experiments/fingerprints/_ex*/
+code/experiments/fingerprints/logs/
