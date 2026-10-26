@@ -112,6 +112,21 @@ BIDIRECTIONAL: bool = True
 #       counts implicit hydrogens, which is 0 for every atom written in brackets ([nH], [NH3+], [C@@H], ...).
 #       Embedding caches of "total" runs carry a "__totalh" suffix.
 HYDROGEN_COUNT: str = 'total'
+# :param SPECTRUM:
+#       Fourier magnitudes of the random codebook vectors (the element vectors and the base vectors of the
+#       fractional power encoders), see ``unit_modulus`` of AtomEncoder and ContinuousEncoder. "unit" (default
+#       since 2026-10-09, ex_22): unit Fourier magnitudes with random phases (FHRR phasors). "gaussian": the random
+#       magnitudes of the original encoder, with which binding concentrates the embeddings on a few Fourier
+#       components. Only used in ENCODING_MODE "continuous". Embedding caches of "unit" runs carry a "__unitspec"
+#       suffix, so caches of the original encoder are never reused for it.
+SPECTRUM: str = 'unit'
+# :param GRAPH_ATTRIBUTES:
+#       Whether the encodings of the graph size and graph diameter are added to the embedding (default True, the
+#       original encoder). False keeps only the message passing part, normalized to unit length as in the original
+#       formula normalize(normalize(S) + normalize(G)) without G (same as in predict_molecules__hdc.py; virtual
+#       screening re-run ex_11_b). The cosine distance does not depend on the normalization. Embedding caches of
+#       False runs carry a "__noglobal" suffix.
+GRAPH_ATTRIBUTES: bool = True
 
 # == EXPERIMENT PARAMETERS ==
 
@@ -202,18 +217,22 @@ def process_dataset(
     # We differentiate two modes: categorical (required for decoding) and
     # continuous (better performance for similarity tasks).
 
+    if e.SPECTRUM not in ('gaussian', 'unit'):
+        raise ValueError(f'SPECTRUM must be "gaussian" or "unit", got {e.SPECTRUM!r}')
     if e.ENCODING_MODE == 'continuous':
         # Continuous mode with FHRR encodings (recommended for bioactivity prediction)
         e.log('using continuous encoding mode with FHRR')
         node_encoder_map = make_molecule_node_encoder_map_cont(
             dim=e.EMBEDDING_SIZE,
             seed=e.SEED,
+            unit_modulus=(e.SPECTRUM == 'unit'),
         )
         graph_encoder_map = make_molecule_graph_encoder_map_cont(
             dim=e.EMBEDDING_SIZE,
             seed=e.SEED,
             max_graph_size=stats['size']['max'],
             max_graph_diameter=stats['diameter']['max'],
+            unit_modulus=(e.SPECTRUM == 'unit'),
         )
 
     elif e.ENCODING_MODE == 'categorical':
@@ -225,11 +244,17 @@ def process_dataset(
         )
         graph_encoder_map = {}
 
+    # --- without the size and diameter encodings (the default keeps them) ---
+    if not e.GRAPH_ATTRIBUTES:
+        graph_encoder_map = {}
+
     e.log('creating HyperNet encoder...')
     e.log(f' * DEVICE: {e.DEVICE}')
     e.log(f' * EMBEDDING_SIZE: {e.EMBEDDING_SIZE}')
     e.log(f' * NUM_LAYERS: {e.NUM_LAYERS}')
     e.log(f' * ENCODING_MODE: {e.ENCODING_MODE}')
+    e.log(f' * BIDIRECTIONAL: {e.BIDIRECTIONAL}, HYDROGEN_COUNT: {e.HYDROGEN_COUNT}, SPECTRUM: {e.SPECTRUM}')
+    e.log(f' * GRAPH_ATTRIBUTES: {e.GRAPH_ATTRIBUTES} ({", ".join(graph_encoder_map) or "none"})')
 
     hyper_net = HyperNet(
         hidden_dim=e.EMBEDDING_SIZE,
@@ -251,7 +276,7 @@ def process_dataset(
     # dataset and generate the HDC vectors for each molecular graph. This is
     # cached to avoid recomputation across runs with the same parameters.
     @experiment.cache.cached(
-        name=f'hdc_{e.DATASET_NAME}__seed_{e.SEED}__size_{e.EMBEDDING_SIZE}__depth_{e.NUM_LAYERS}__mode_{e.ENCODING_MODE}{"__bidir" if e.BIDIRECTIONAL else ""}{"__totalh" if e.HYDROGEN_COUNT == "total" else ""}'
+        name=f'hdc_{e.DATASET_NAME}__seed_{e.SEED}__size_{e.EMBEDDING_SIZE}__depth_{e.NUM_LAYERS}__mode_{e.ENCODING_MODE}{"__bidir" if e.BIDIRECTIONAL else ""}{"__totalh" if e.HYDROGEN_COUNT == "total" else ""}{"__unitspec" if e.ENCODING_MODE == "continuous" and e.SPECTRUM == "unit" else ""}{"" if e.GRAPH_ATTRIBUTES else "__noglobal"}'
     )
     def process_dataset_cached():
 
@@ -281,15 +306,28 @@ def process_dataset(
         e.log(f'processed {len(graphs)} molecules into graph dicts after '
               f'{time_end_process - time_start_process:.2f} seconds')
 
-        # Forward pass through HyperNet
+        # Forward pass through HyperNet, in chunks of whole batches that keep only the graph embedding of each
+        # molecule. The per-layer stack of the results is not needed and took about half of the memory in ex_11
+        # (DUD-E: 43 GB peak). Since every chunk is a multiple of BATCH_SIZE, the batches and thus the embeddings
+        # are the same as in a single call over all molecules.
         e.log('encoding molecules with HyperNet...')
         time_start_forward = time.time()
 
-        results = hyper_net.forward_graphs(graphs, batch_size=e.BATCH_SIZE)
-
-        for (index, graph), result in zip(index_data_map.items(), results):
-            # Store HDC embedding as graph_features
-            index_data_map[index]['graph_features'] = result['graph_embedding']
+        chunk_size = 100 * e.BATCH_SIZE
+        indices = list(index_data_map.keys())
+        for start in range(0, len(graphs), chunk_size):
+            results = hyper_net.forward_graphs(graphs[start:start + chunk_size], batch_size=e.BATCH_SIZE)
+            for index, result in zip(indices[start:start + chunk_size], results):
+                # Store HDC embedding as graph_features
+                embedding = result['graph_embedding']
+                # Without graph attributes HyperNet returns the raw sum-pooled readout, whose norm grows with the
+                # molecule size. Normalizing it gives the original formula with the size/diameter part removed.
+                if not e.GRAPH_ATTRIBUTES:
+                    embedding = embedding / np.linalg.norm(embedding)
+                index_data_map[index]['graph_features'] = embedding
+            del results
+            e.log(f' * {min(start + chunk_size, len(graphs))} of {len(graphs)} molecules encoded after '
+                  f'{time.time() - time_start_forward:.0f} seconds')
 
         time_end_forward = time.time()
         e.log(f'encoded {len(graphs)} molecules with HyperNet after '
