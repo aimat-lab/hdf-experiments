@@ -122,7 +122,7 @@ and writes a metrics summary, logs and figures to `/results`:
    surrogates. Figure `figure_bo`.
 
 Tiers (`TIER=smoke|demo|full`): `smoke` (minutes; 1 seed, BACE only, 2 BO
-campaigns), `demo` (default; about 1–1.5 h with 4 CPU cores), `full` (the full
+campaigns), `demo` (default; about 2 h with 4 CPU cores, about 1 h with 8), `full` (the full
 protocols ex_27, ex_20, ex_08_c and ex_24; needs a cluster). `JOBS` sets the
 number of parallel runs (default: half the cores, at most 8).
 

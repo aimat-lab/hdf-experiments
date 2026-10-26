@@ -28,7 +28,7 @@
 # on HPC nodes and GPUs) and network access for the large datasets.
 #
 # Tiers:   TIER=smoke  (minutes: 1 seed, 2 BO campaigns)   -- sanity check
-#          TIER=demo   (about 1-1.5 h with 4 cores)        -- DEFAULT
+#          TIER=demo   (about 2 h with 4 cores, 1 h with 8)  -- DEFAULT
 #          TIER=full   (cluster)                           -- full protocols [1]-[4]
 # JOBS (default: half the cores, between 1 and 8) experiments run in parallel,
 # each with 2 threads.
