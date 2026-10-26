@@ -74,6 +74,21 @@ def generate_hermitian_symmetric_vector(k, rng=None):
     return torch.from_numpy(full_spectrum)
 
 
+def to_unit_modulus(spectrum: torch.Tensor) -> torch.Tensor:
+    """
+    Sets the magnitude of every complex Fourier coefficient in ``spectrum`` to one and keeps its phase
+    (coefficients that are exactly zero, which have no phase, become one). A Hermitian symmetric spectrum stays
+    Hermitian symmetric, so the corresponding time-domain vector stays real.
+
+    :param spectrum: Complex tensor of Fourier coefficients (the last dimension is the frequency axis).
+    :returns: Complex tensor of the same shape with unit-modulus entries.
+    """
+    magnitude = spectrum.abs()
+    nonzero = magnitude > 0
+    unit = spectrum / torch.where(nonzero, magnitude, torch.ones_like(magnitude))
+    return torch.where(nonzero, unit, torch.ones_like(unit))
+
+
 class AbstractEncoder:
     """
     Abstract base class for the property encoders. An encoder class is used to encode individual properties 
@@ -144,6 +159,13 @@ class ContinuousEncoder(AbstractEncoder):
     :type bandwidth: float
     :param seed: Random seed for reproducible encoder generation
     :type seed: Optional[int]
+    :param unit_modulus: If True (default), every Fourier coefficient of the base vector has magnitude one and
+        only its random phase is kept (FHRR phasors, a unitary base vector). A value then only rotates the
+        phases: every encoded value has the same norm, and the similarity of two values depends only on their
+        difference. False keeps the complex Gaussian spectrum of the original implementation, whose random
+        magnitudes are raised to the power value / bandwidth as well, so that binding concentrates the
+        hypervectors on a few Fourier components. Both versions use the same random draw (the same phases).
+    :type unit_modulus: bool
     """
     def __init__(
         self,
@@ -151,14 +173,18 @@ class ContinuousEncoder(AbstractEncoder):
         size: float,
         bandwidth: float,
         seed: Optional[int] = None,
+        unit_modulus: bool = True,
     ):
         self.dim = dim
         self.size = size
         self.bandwidth = bandwidth
         self.seed = seed
-        
+        self.unit_modulus = unit_modulus
+
         rng = np.random.default_rng(seed + 1) if seed is not None else None
         self.matrix = generate_hermitian_symmetric_vector(self.dim, rng=rng)
+        if unit_modulus:
+            self.matrix = to_unit_modulus(self.matrix)
 
     def encode(self, value: Any) -> torch.Tensor:
         """
@@ -655,3 +681,52 @@ def render_latex(kwargs: dict,
         pdf_file_path = os.path.join(temp_path, 'main.pdf')
         shutil.copy(pdf_file_path, output_path)
 
+
+
+def quantize_equal_frequency(features: np.ndarray,
+                             train_rows: np.ndarray,
+                             bits: int,
+                             ) -> np.ndarray:
+    """
+    Quantizes every column of ``features`` to ``2 ** bits`` levels with equal-frequency (quantile) bins that
+    are fitted on the rows ``train_rows`` only, and returns the dequantized matrix (float32) in which each value
+    is replaced by the mean of the training values in its bin.
+
+    The bin edges of a column are the j / 2**bits quantiles (j = 1 ... 2**bits - 1) of its training values,
+    so every bin holds about the same number of training values. Identical values always share a level, so a
+    column with many tied training values can end up with fewer than 2**bits levels (a bin that stays empty in
+    the training data gets the midpoint of its edges). If there are at least as many levels as training rows,
+    every distinct training value becomes its own level: training values stay unchanged and every other value is
+    mapped to the nearest training value.
+
+    :param features: The (num_samples, num_features) matrix to quantize.
+    :param train_rows: The row indices of ``features`` from which the bins are fitted.
+    :param bits: The number of bits per value, i.e. the quantized matrix has ``2 ** bits`` levels per column.
+
+    :returns: A float32 array of the same shape as ``features``.
+    """
+    features = np.asarray(features, dtype=np.float64)
+    train_rows = np.asarray(train_rows)
+    if not np.isfinite(features).all():
+        raise ValueError('quantize_equal_frequency: features contain NaN or infinite values')
+    num_levels = 2 ** bits
+    quantized = np.empty(features.shape, dtype=np.float32)
+    for col in range(features.shape[1]):
+        values = features[:, col]
+        train = np.sort(values[train_rows])
+        if num_levels >= len(train):
+            levels = np.unique(train)
+            upper = np.clip(np.searchsorted(levels, values), 1, len(levels) - 1) if len(levels) > 1 else np.zeros(len(values), dtype=int)
+            lower = np.maximum(upper - 1, 0)
+            nearest = np.where(np.abs(values - levels[lower]) <= np.abs(levels[upper] - values), lower, upper)
+            quantized[:, col] = levels[nearest]
+            continue
+        edges = np.quantile(train, np.arange(1, num_levels) / num_levels)
+        codes = np.searchsorted(edges, values, side='right')
+        train_codes = codes[train_rows]
+        sums = np.bincount(train_codes, weights=values[train_rows], minlength=num_levels)
+        counts = np.bincount(train_codes, minlength=num_levels)
+        bounds = np.concatenate([[train[0]], edges, [train[-1]]])
+        centers = np.where(counts > 0, sums / np.maximum(counts, 1), (bounds[:-1] + bounds[1:]) / 2)
+        quantized[:, col] = centers[codes]
+    return quantized
