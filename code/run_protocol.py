@@ -80,10 +80,27 @@ def apply_overrides(line: str, overrides: dict, cpu: bool) -> str:
         elif cpu and token == 'cuda':
             token = 'cpu'
         out.append(shlex.quote(token))
+    # parameters the line does not set are appended if the script (or a module it extends) defines them
+    script = tokens[1] if len(tokens) > 1 else ''
     for key, value in overrides.items():
-        if key not in seen:
+        if key not in seen and (key.startswith('__') or key in module_parameters(script)):
             out.append(f'--{key}={double_quoted(value)}')
     return ' '.join(out)
+
+
+def module_parameters(script: str, seen=None) -> set:
+    """Upper-case module-level names of an experiment script and of the modules it extends (Experiment.extend)."""
+    seen = set() if seen is None else seen
+    path = os.path.join(EXPERIMENTS, script)
+    if script in seen or not os.path.isfile(path):
+        return set()
+    seen.add(script)
+    with open(path) as f:
+        source = f.read()
+    names = set(re.findall(r'^([A-Z][A-Z0-9_]*)\s*(?::[^=\n]*)?=', source, re.M))
+    for parent in re.findall(r"Experiment\.extend\(\s*['\"]([^'\"]+\.py)['\"]", source):
+        names |= module_parameters(parent, seen)
+    return names
 
 
 def double_quoted(value: str) -> str:
@@ -102,8 +119,9 @@ def main():
                         help='run only lines that contain this regular expression (repeatable: all must match)')
     parser.add_argument('--limit', type=int, default=None, help='at most this many lines per stage')
     parser.add_argument('--set', action='append', default=[], metavar='KEY=VALUE',
-                        help='override a parameter of every selected line (VALUE as a Python literal, e.g. '
-                             "EPOCHS=5 or DATASET_NAME=\"'freesolv'\")")
+                        help='override a parameter of the selected lines (VALUE as a Python literal, e.g. '
+                             "EPOCHS=5 or DATASET_NAME=\"'freesolv'\"); added to lines that do not set it only if "
+                             'their script defines the parameter')
     parser.add_argument('--jobs', type=int, default=1, help='lines of a stage that run in parallel (default 1)')
     parser.add_argument('--threads', type=int, default=2, help='OMP/MKL threads per line (default 2)')
     parser.add_argument('--cpu', action='store_true', help="replace 'cuda' by 'cpu' even if a GPU is available")
