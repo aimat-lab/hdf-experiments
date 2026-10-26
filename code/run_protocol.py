@@ -15,7 +15,9 @@ Most protocols took tens to thousands of CPU or GPU hours on HPC clusters, so th
 
 Without a GPU (or with ``--cpu``), the device parameters of the paper's GPU runs ('cuda') are replaced by 'cpu'; the
 results are the same up to floating-point differences (graph_hdc's ex_27 checked this for the MLP and the KNN). Every
-line gets its own log file in ``--log-dir``; the script exits with status 1 if any line failed.
+line gets its own log file and temporary folder (TMPDIR) in ``--log-dir``; the script exits with status 1 if any line
+failed. Load a dataset once (e.g. by running one line) before running many lines on it in parallel: concurrent first
+downloads into the chem_mat_data cache can corrupt it.
 """
 import argparse
 import os
@@ -183,7 +185,12 @@ def main():
         with open(log, 'w') as f:
             f.write(line + '\n\n')
             f.flush()
-            code = subprocess.call(['bash', '-c', line], cwd=EXPERIMENTS, env=env, stdout=f, stderr=subprocess.STDOUT)
+            # a private temporary folder per line, as in the paper's runs: chem_mat_data and predict_bioactivity write
+            # into the temporary folder, and parallel runs on the same dataset must not share it
+            tmp = os.path.join(log_dir, 'tmp', f'{stage}__{index:05d}')
+            os.makedirs(tmp, exist_ok=True)
+            code = subprocess.call(['bash', '-c', line], cwd=EXPERIMENTS, env={**env, 'TMPDIR': tmp},
+                                   stdout=f, stderr=subprocess.STDOUT)
         status = 'ok' if code == 0 else f'FAILED (exit {code})'
         print(f'[{stage} {index}] {status} after {time.time() - start:.0f} s  (log: {log})', flush=True)
         return code, log

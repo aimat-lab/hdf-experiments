@@ -91,8 +91,9 @@ Fig. 2 with one fixed HDF codebook, Figs. 3b, 4 and S1 with a new codebook per
 seed). Tables S9–S11, S13, S14 and Fig. S5: 10 seeds. Bayesian optimization
 (Fig. 5, Fig. S3): 100 campaigns per objective, representation and size; Fig. 5
 shows HDF with a **linear kernel** against Morgan fingerprints with a
-**Tanimoto kernel** (and random search), Fig. S3 adds HDF and Morgan-PCA with a
-Matérn-5/2 kernel as controls. Virtual screening: 50 repetitions of 5 query
+**Tanimoto kernel** (and random search); Fig. S3 (all nine objectives) also uses
+HDF + linear kernel as the main HDF surrogate, with HDF and Morgan-PCA with a
+Matérn-5/2 kernel as kernel controls. Virtual screening: 50 repetitions of 5 query
 actives. Exact GED: 5 HDF codebook seeds.
 
 Some protocols depend on others: ex_19, ex_25 and ex_26 read the ex_14 HDF
