@@ -11,11 +11,14 @@ description: >-
   representations. This capsule contains the hyperdimensional-computing library
   (`graph_hdc`) and the experiment code that reproduces the paper's results:
   property prediction across fingerprint methods and ML models,
-  graph-edit-distance correlation, embedding-size ablations, Bayesian molecular
-  optimization, and similarity-based virtual screening. The Reproducible Run
-  executes a scaled-down demonstration on small datasets; the full protocol
-  (all datasets, 5 seeds) requires a compute cluster and is documented in
-  README.md.
+  graph-edit-distance correlation, embedding-size and bit-depth ablations,
+  Bayesian molecular optimization, similarity-based virtual screening, and the
+  comparisons with graph neural networks and modern fingerprints of the revised
+  version. All HDF results use the revised standard encoder (bidirectional
+  message passing, unit-modulus codebooks, total hydrogen counts). The
+  Reproducible Run executes a scaled-down version of the main experiments
+  (10 seeds on small datasets, 10 BO campaigns); the exact command lines of
+  every paper item are in code/protocols and documented in README.md.
 
 tags:
   - molecular-fingerprints
