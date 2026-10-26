@@ -12,7 +12,7 @@ set -eu
 python - <<'PY'
 from chem_mat_data.main import load_graph_dataset
 # small, fast demo datasets only
-for name in ["hopv15_exp", "freesolv", "bace_reg", "aqsoldb"]:
+for name in ["hopv15_exp", "freesolv", "bace_reg", "aqsoldb", "lipophilicity"]:
     try:
         load_graph_dataset(name)
         print(f"[postInstall] cached dataset: {name}")

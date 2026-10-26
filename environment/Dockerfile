@@ -56,7 +56,14 @@ RUN pip install \
         python-decouple==3.8 \
         rich-click==1.8.9 \
         click==8.3.0 \
-        jinja2==3.1.6
+        jinja2==3.1.6 \
+        torchmetrics==1.7.3 \
+        optuna==4.5.0
+
+# -- MHFP reference implementation (SECFP and the hashing of MAP4, Supplementary
+#    Section S11). Installed without its dependencies: the PyPI package declares
+#    heavy optional ones (tmap, faerun) that the fingerprints do not use. --
+RUN pip install --no-deps mhfp==1.9.6
 
 # -- packages distributed via git (not on PyPI) --
 #    chem-mat-database: dataset access by identifier

@@ -33,6 +33,9 @@ dependencies = [
     "rich-click>=1.8,<1.9",
     "click>=8.0",
     "jinja2>=3.0",
+    "torchmetrics>=1.4",
+    "optuna>=4.0",
+    "mhfp>=1.9.6",
     "chem_mat_database @ git+https://github.com/the16thpythonist/chem_mat_data.git",
 ]
 
