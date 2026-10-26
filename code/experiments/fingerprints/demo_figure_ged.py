@@ -7,12 +7,13 @@ fingerprints (radius 2) against hyperdimensional fingerprints (HDF, depth 2).
 Higher is better: a faithful representation places structurally similar
 molecules close together.
 
-Data: ``molecule_similarity__{fp,hdc}`` archives run with ``__PREFIX__=ex_08_a``,
-reading the per-query ``ged_correlation_summary.csv`` (reused, not re-run).
+Data: ``molecule_similarity__{fp,hdc}`` archives of the reproducible run
+(``__PREFIX__=demo_ged``), reading the per-query ``ged_correlation_summary.csv``.
+The paper's Figure 3a (ex_08_c, ZINC250k, 100 seed molecules) is protocols/ex_08_c.txt.
 
 Usage::
 
-    python make_figure_ged.py
+    python demo_figure_ged.py
 """
 import os
 import pathlib
@@ -30,7 +31,7 @@ from figure_style import (apply_style, iter_archives, method_of,
 PATH = str(pathlib.Path(__file__).parent.absolute())
 RESULTS_PATH = os.path.join(PATH, 'results')
 FIG_DIR = os.path.join(PATH, 'figures')
-GED_PREFIX = 'ex_08_a'
+GED_PREFIX = os.environ.get('DEMO_PREFIX_GED', 'demo_ged')
 # Embedding sizes shown, in the paper's canonical set. (Other sizes present in
 # the archives are ignored so the demo and paper figures line up.)
 GED_SIZES = [32, 128, 512, 2048]

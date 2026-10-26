@@ -1,108 +1,88 @@
 """
-figure_bo -- Bayesian optimization sample efficiency.
+figure_bo -- Bayesian optimization sample efficiency (demo of main-text Figure 5a,b).
 
-Evolution of the objective (best distance-to-target found so far, lower is
-better) versus optimization round, comparing a random-representation baseline,
-Morgan fingerprints and hyperdimensional fingerprints (HDF) as the surrogate
-model's molecular representation. Lines are the mean over independent trials,
-shaded bands are +/- one standard deviation.
+Normalized regret of the best molecule found so far (lower is better) versus BO
+round for the ClogP objective (target value 15 on AqSolDB), one panel per
+embedding size: random search, Morgan fingerprints with a Tanimoto kernel and
+HDF with a linear kernel (the surrogates of Figure 5), plus the two SI
+surrogates (Morgan PCA + Matern, HDF + Matern) as thin lines. Lines are the mean
+over the campaigns, bands the standard error.
 
-Data: ``optimize_molecule_bo__{hdc,fp,random}`` archives, reading the per-round
-``bo_results.csv`` and the global optimum from ``experiment_data.json``.
+Data: the campaign results of ``bo_benchmark.py`` under $EX24_ROOT/runs (the
+reproducible run sets EX24_ROOT to ``_ex24_demo``). The paper's figure
+(100 campaigns, nine sizes, QED as well) is made by ``make_figure_bo.py`` from
+the full benchmark (protocols/ex_24.txt).
 
 Usage::
 
-    python make_figure_bo.py
+    EX24_ROOT=_ex24_demo python demo_figure_bo.py
 """
-import os
 import json
+import os
 import pathlib
-from collections import defaultdict
+import re
 
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 
-from figure_style import (apply_style, iter_archives, method_of, dataset_of,
-                          METHOD_COLOR, METHOD_FILL, METHOD_LABEL, save_figure)
+from figure_style import apply_style, COLOR_HDC, COLOR_FP, COLOR_RANDOM, save_figure
 
 PATH = str(pathlib.Path(__file__).parent.absolute())
-RESULTS_PATH = os.path.join(PATH, 'results')
+ROOT = os.environ.get('EX24_ROOT', os.path.join(PATH, '_ex24_demo'))
 FIG_DIR = os.path.join(PATH, 'figures')
+OBJECTIVE = 'clogp'
 
-DATASET_LABEL = {'clogp': 'ClogP', 'zinc250k': 'ZINC250k (QED)',
-                 'freesolv': 'FreeSolv', 'qm9_gap': 'QM9 (gap)'}
+# (method, label, colour, line width): Figure 5 surrogates bold, SI surrogates thin
+METHODS = [
+    ('random', 'Random search', COLOR_RANDOM, 2.0),
+    ('morgan_pca', 'Morgan PCA + Matérn (SI)', '#4C64EB', 1.0),
+    ('hdf_matern', 'HDF + Matérn (SI)', '#69F7AE', 1.0),
+    ('morgan_tanimoto', 'Morgan + Tanimoto', '#7C92FF', 2.4),
+    ('hdf_linear', 'HDF + linear (ours)', COLOR_HDC, 2.4),
+]
 
 apply_style()
 
 
-def load_bo():
-    """(dataset, method) -> {round -> [best_distance, ...]}, plus optimum per dataset."""
-    curves = defaultdict(lambda: defaultdict(list))
-    optimum = {}
-    for path, namespace, meta, params in iter_archives(RESULTS_PATH):
-        if 'optimize_molecule_bo' not in namespace:
-            continue
-        method = method_of(namespace)
-        dataset = dataset_of(namespace)
-        csv_path = os.path.join(path, 'bo_results.csv')
-        if method == 'unknown' or not os.path.exists(csv_path):
-            continue
-        df = pd.read_csv(csv_path)
-        for rnd, sub in df.groupby('round'):
-            curves[(dataset, method)][int(rnd)].extend(
-                sub['best_distance'].astype(float).tolist())
-        # global optimum (best achievable distance) for the reference line
-        dj = os.path.join(path, 'experiment_data.json')
-        if dataset not in optimum and os.path.exists(dj):
-            try:
-                opt = json.load(open(dj)).get('optimization', {})
-                if 'optimal_distance' in opt:
-                    optimum[dataset] = float(opt['optimal_distance'])
-            except Exception:
-                pass
-    return curves, optimum
+def regret_curves(method: str, size) -> np.ndarray:
+    """Normalized regret per round of all finished campaigns of one cell, shape (campaigns, rounds + 1)."""
+    folder = os.path.join(ROOT, 'runs', OBJECTIVE, method, 'Dna' if size is None else f'D{int(size)}')
+    if not os.path.isdir(folder):
+        return np.empty((0, 0))
+    curves = []
+    for name in sorted(n for n in os.listdir(folder) if re.fullmatch(r'c\d+\.npz', n)):
+        result = np.load(os.path.join(folder, name))
+        meta = json.loads(str(result['meta']))
+        curves.append((meta['objective_max'] - result['best']) / (meta['objective_max'] - meta['objective_min']))
+    return np.array(curves)
 
 
 def main():
-    curves, optimum = load_bo()
-    if not curves:
-        raise SystemExit(f'No Bayesian-optimization archives found under {RESULTS_PATH}.')
+    folder = os.path.join(ROOT, 'runs', OBJECTIVE)
+    if not os.path.isdir(folder):
+        raise SystemExit(f'No BO campaigns found under {folder}.')
+    sizes = sorted({int(d[1:]) for m in os.listdir(folder) for d in os.listdir(os.path.join(folder, m))
+                    if re.fullmatch(r'D\d+', d)})
+    if not sizes:
+        raise SystemExit(f'No BO campaigns with an embedding size under {folder}.')
 
-    # pick the dataset with the most methods present (ties -> clogp if available)
-    per_dataset = defaultdict(set)
-    for (ds, m) in curves:
-        per_dataset[ds].add(m)
-    dataset = max(per_dataset, key=lambda d: (len(per_dataset[d]), d == 'clogp'))
-    ds_label = DATASET_LABEL.get(dataset, dataset)
-    print(f'BO figure dataset: {dataset}  methods: {sorted(per_dataset[dataset])}')
-
-    fig, ax = plt.subplots(figsize=(7.6, 4.6))
-
-    for method in ('random', 'fp', 'hdc'):     # draw HDF last so it sits on top
-        rounds_map = curves.get((dataset, method))
-        if not rounds_map:
-            continue
-        rounds = np.array(sorted(rounds_map))
-        mean = np.array([np.mean(rounds_map[r]) for r in rounds])
-        std = np.array([np.std(rounds_map[r]) for r in rounds])
-        color = METHOD_COLOR[method]
-        ax.fill_between(rounds, mean - std, mean + std, color=METHOD_FILL[method],
-                        alpha=0.35, linewidth=0, zorder=2)
-        ax.plot(rounds, mean, color=color, linewidth=2.4,
-                label=METHOD_LABEL[method], zorder=3,
-                solid_capstyle='round')
-
-    if dataset in optimum:
-        ax.axhline(optimum[dataset], color='#555555', linestyle='--', linewidth=1.2,
-                   zorder=1, label=f'Global optimum ({optimum[dataset]:.2f})')
-
-    ax.set_xlabel('BO round')
-    ax.set_ylabel(r'Best distance to target found  $\downarrow$')
-    ax.set_ylim(bottom=0)
-    ax.set_xlim(left=0)
-    ax.set_title(f'Bayesian optimization sample efficiency — {ds_label}')
-    ax.legend(loc='upper right')
+    fig, axes = plt.subplots(1, len(sizes), figsize=(6.4 * len(sizes), 4.6), squeeze=False)
+    for ax, size in zip(axes[0], sizes):
+        for method, label, color, lw in METHODS:
+            curves = regret_curves(method, None if method == 'random' else size)
+            if curves.size == 0:
+                continue
+            rounds = np.arange(curves.shape[1])
+            mean = curves.mean(axis=0)
+            sem = curves.std(axis=0, ddof=1) / np.sqrt(len(curves)) if len(curves) > 1 else np.zeros_like(mean)
+            ax.plot(rounds, mean, color=color, lw=lw, label=f'{label} (n={len(curves)})', zorder=3)
+            ax.fill_between(rounds, mean - sem, mean + sem, color=color, alpha=0.15, lw=0, zorder=2)
+        ax.set_xlim(left=0)
+        ax.set_ylim(bottom=0)
+        ax.set_xlabel('BO round')
+        ax.set_ylabel(r'Normalized regret  $\downarrow$')
+        ax.set_title(f'ClogP target on AqSolDB, {size} dimensions')
+        ax.legend(loc='upper right', fontsize=9)
 
     fig.tight_layout()
     save_figure(fig, FIG_DIR, 'figure_bo')

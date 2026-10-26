@@ -1,142 +1,181 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Reproducible-run driver for the Hyperdimensional Fingerprints (HDF) artifact.
+# Reproducible-run driver for the Hyper-Dimensional Fingerprints (HDF) capsule.
 #
-# This is the entry point for a Code Ocean "Reproducible Run". It executes a
-# SCALED-DOWN demonstration of the paper's experiments on small datasets so that
-# it completes within the capsule's compute budget, then generates figures and
-# collects all outputs into $RESULTS_DIR (/results on Code Ocean).
+# This is the entry point for a Code Ocean "Reproducible Run". It runs a
+# SCALED-DOWN version of the paper's main experiments with the revised HDF
+# (standard configuration: bidirectional message passing, unit-modulus
+# codebooks, total hydrogen counts; D=2048, depth 2) and the revised protocols,
+# draws demo figures and collects all outputs into $RESULTS_DIR (/results on
+# Code Ocean):
 #
-# The FULL protocol from the paper (all 9 datasets, embedding sweeps, 5 seeds,
-# 25 BO trials, 50 screening repetitions) is reproduced by `TIER=full bash run`
-# but requires a multi-core cluster and network access for the large datasets
-# (qm9_smiles ~670 MB, zinc250k, compas_3x). See README.md.
+#   [1] Table 1 / Supplementary Table S6 protocol: MLP (100,100) and KNN (k=5,
+#       cosine for HDF, Tanimoto for Morgan) on the same splits, one fixed HDF
+#       codebook, 10 seeds, HDF vs Morgan on BACE, Lipophilicity, AqSolDB and
+#       ClogP (full datasets)
+#   [2] Supplementary Fig. S5: bit-depth ablation, the paper's exact runs on
+#       FreeSolv (protocols/ex_20.txt: 10 seeds x 7 runs)
+#   [3] Fig. 3a analogue: edit-based GED correlation over embedding sizes on a
+#       QM9 subsample (the paper uses 100 ZINC250k seeds, protocols/ex_08_c.txt)
+#   [4] Fig. 5a,b analogue: Bayesian optimization of ClogP on AqSolDB at 16 and
+#       1024 dimensions with the paper's benchmark code (bo_benchmark.py): HDF +
+#       linear kernel vs Morgan + Tanimoto vs random search, plus the two SI
+#       surrogates; 10 campaigns instead of 100
 #
-# Tiers:   TIER=smoke  (minutes, 1 seed)   -- CI-style sanity check
-#          TIER=demo   (hours, 3 seeds)    -- DEFAULT, representative figures
-#          TIER=full   (cluster, 5 seeds)  -- full paper protocol
+# The FULL protocol of every paper item is in protocols/<experiment>.txt and runs
+# with run_protocol.py (see README.md). `TIER=full bash run` runs the full
+# protocols behind [1]-[4], which needs a multi-core cluster (the paper ran them
+# on HPC nodes and GPUs) and network access for the large datasets.
+#
+# Tiers:   TIER=smoke  (minutes: 1 seed, 2 BO campaigns)   -- sanity check
+#          TIER=demo   (about 1-1.5 h with 4 cores)        -- DEFAULT
+#          TIER=full   (cluster)                           -- full protocols [1]-[4]
+# JOBS (default: half the cores, between 1 and 8) experiments run in parallel,
+# each with 2 threads.
 #
 # Every experiment step is fault-tolerant: a failure is logged and the run
 # continues, so partial results and figures are still collected.
 # =============================================================================
 set -uo pipefail
 cd "$(dirname "$0")"                       # -> /code
+CODE="$(pwd)"
 EXP="experiments/fingerprints"
 export MPLBACKEND=Agg
 # make the vendored `graph_hdc` package importable even after we cd into the
 # experiment directory (needed for the YAML extend/include path resolution).
-export PYTHONPATH="$(pwd)${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$CODE${PYTHONPATH:+:$PYTHONPATH}"
+export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 PYTHONDONTWRITEBYTECODE=1
 
 TIER="${TIER:-demo}"
+NPROC="$(nproc 2>/dev/null || echo 2)"
+JOBS="${JOBS:-$(( NPROC / 2 > 8 ? 8 : (NPROC / 2 < 1 ? 1 : NPROC / 2) ))}"
 RESULTS_DIR="${RESULTS_DIR:-/results}"
 if ! ( mkdir -p "$RESULTS_DIR" && [ -w "$RESULTS_DIR" ] ) 2>/dev/null; then
-    RESULTS_DIR="$(pwd)/results_out"; mkdir -p "$RESULTS_DIR"
+    RESULTS_DIR="$CODE/results_out"; mkdir -p "$RESULTS_DIR"
 fi
-mkdir -p "$RESULTS_DIR/figures"
+LOGS="$RESULTS_DIR/logs"
+mkdir -p "$RESULTS_DIR/figures" "$LOGS"
+# the BO benchmark keeps its libraries, encodings and campaign results here
+export EX24_ROOT="${EX24_ROOT:-$CODE/$EXP/_ex24_demo}"
 
 case "$TIER" in
-  smoke) SEEDS=(0);           SUB=300;  SIZES=(32 2048);                     BO_DIM=64; BO_TRIALS=2;  BO_ROUNDS=10; BIO_REPS=3;  BIO_SETS=() ;;
-  demo)  SEEDS=(0 1 2);       SUB=2000; SIZES=(32 128 512 2048); BO_DIM=64; BO_TRIALS=5;  BO_ROUNDS=25; BIO_REPS=10; BIO_SETS=() ;;   # bioactivity is full-only (riniker_1 ~168k molecules is too heavy to HDC-encode on CPU)
-  full)  SEEDS=(0 1 2 3 4);   SUB=None; SIZES=(32 128 512 2048); BO_DIM=64; BO_TRIALS=25; BO_ROUNDS=25; BIO_REPS=50; BIO_SETS=(dud_e muv riniker_1 riniker_2) ;;
+  smoke) SEEDS=(0);                   PRED_DATASETS="bace";                     BITS_SEEDS="0";
+         GED_SAMPLES=8;  GED_POOL=1500; SIZES=(32 2048);         BO_CAMPAIGNS="0-1"; BO_SIZES="16" ;;
+  demo)  SEEDS=(0 1 2 3 4 5 6 7 8 9); PRED_DATASETS="bace lipop aqsoldb clogp"; BITS_SEEDS="all";
+         GED_SAMPLES=25; GED_POOL=5000; SIZES=(32 128 512 2048); BO_CAMPAIGNS="0-9"; BO_SIZES="16 1024" ;;
+  full)  ;;
   *) echo "unknown TIER=$TIER (use smoke|demo|full)"; exit 2 ;;
 esac
 
-# In the scaled-down tiers, force fractional train/val/test splits so subsampled
-# runs never hit "sample larger than population" from configs that hard-code an
-# absolute test-set size (e.g. NUM_TEST: 1000, sized for the full dataset). The
-# `full` tier uses each config's own split settings unchanged.
-if [ "$TIER" = "full" ]; then SPLIT=(); else SPLIT=(--NUM_TEST="0.1" --NUM_VAL="0.1"); fi
-
-# GED sweep sampling: the correlation is estimated over GED_SAMPLES query
-# molecules (shared across embedding sizes). Too few queries makes an individual
-# box noisy, so use a generous count even in the demo.
-case "$TIER" in
-  smoke) GED_SAMPLES=8;  GED_POOL=1500 ;;
-  demo)  GED_SAMPLES=25; GED_POOL=5000 ;;
-  full)  GED_SAMPLES=50; GED_POOL=None ;;
-esac
-
-# Property-prediction datasets. The demo uses only datasets large enough for a
-# stable R^2 (HOPV15's 175 molecules give meaningless variance at demo scale);
-# the full tier runs the complete set reported in the paper.
-case "$TIER" in
-  smoke) PRED_DATASETS="bace clogp" ;;
-  demo)  PRED_DATASETS="bace lipop aqsoldb clogp" ;;
-  full)  PRED_DATASETS="hopv15_exp bace lipop aqsoldb clogp compas qm9_smiles zinc250" ;;
-esac
-
-# special pycomex params applied to every run:
-#  __DEBUG__=False  -> full (non-debug) archives
-#  __CACHING__=False -> avoid the dataset-name-keyed load cache poisoning across NUM_DATA
-COMMON=(--__DEBUG__="False" --__CACHING__="False")
-
 echo "########################################################################"
-echo "# HDF artifact reproducible run   TIER=$TIER   ->  $RESULTS_DIR"
+echo "# HDF capsule reproducible run   TIER=$TIER   JOBS=$JOBS   ->  $RESULTS_DIR"
 echo "########################################################################"
 START=$SECONDS
 
+# Run one pycomex experiment from its own directory (pycomex resolves the YAML's
+# `extend:`/`include:` relative to the CWD); a failure never aborts the driver.
+# __DEBUG__=False gives full (non-debug) archives. Caching stays on: all runs
+# below use full datasets, and the HDF encoding of a dataset with the fixed
+# codebook (CODEBOOK_SEED 0) is computed once and shared by all seeds (ex_27).
 run_exp() {
     local y="$1"; shift
-    echo; echo ">>> pycomex run $y $*  (cwd=$EXP)"
-    # pycomex resolves the YAML's `extend:`/`include:` relative to the CWD, so
-    # run each experiment from inside its own directory.
-    ( cd "$EXP" && pycomex run "$y" "${COMMON[@]}" "$@" ) || echo "!!! FAILED: $y (continuing)"
+    local log="$LOGS/$(basename "$y" .yml)__$(echo "$*" | md5sum | cut -c1-8).log"
+    echo ">>> pycomex run $y $*"
+    ( cd "$EXP" && pycomex run "$y" --__DEBUG__="False" "$@" ) > "$log" 2>&1 \
+        || echo "!!! FAILED: $y $* (log: $log, continuing)"
 }
+export -f run_exp
+export EXP LOGS
 
-# -- 1. Property prediction across ML models & fingerprints (Fig 1 / Table 1) --
-echo; echo "===== [1/4] property prediction ====="
-for seed in "${SEEDS[@]}"; do
-  for ds in $PRED_DATASETS; do
-    # small datasets (hopv15_exp=175, bace_reg=1513) are smaller than SUB, so
-    # subsampling would raise "sample larger than population" -- use all of them.
-    case "$ds" in
-      hopv15_exp|bace) nd="None" ;;
-      *)               nd="$SUB" ;;
-    esac
-    run_exp "predict_molecules__hdc__${ds}.yml" --SEED="$seed" --NUM_DATA="$nd" "${SPLIT[@]}"
-    run_exp "predict_molecules__fp__${ds}.yml"  --SEED="$seed" --NUM_DATA="$nd" "${SPLIT[@]}"
+# Run the lines of a file in parallel, JOBS at a time. Every line is a complete
+# "run_exp <yml> <args...>" call with shell-quoted arguments.
+run_parallel() {
+    [ -s "$1" ] && xargs -P "$JOBS" -d '\n' -I{} bash -c '{}' < "$1"
+}
+line() { printf '%q ' run_exp "$@"; echo; }
+
+if [ "$TIER" = "full" ]; then
+    for proto in ex_27 ex_20 ex_08_c ex_24; do
+        echo; echo "===== full protocol $proto ====="
+        python run_protocol.py "$proto" --jobs "$JOBS" --log-dir "$LOGS" || echo "!!! $proto had failures"
+    done
+else
+
+# -- 1. Table 1 / Table S6 protocol: MLP + KNN, HDF vs Morgan, 10 seeds --------
+echo; echo "===== [1/4] property prediction (Table 1 / Table S6 protocol) ====="
+# The fixed configuration of Table 1 (MLP) and Supplementary Table S6 (KNN): both
+# models are trained in the same run on the same split (10% test); HDF uses one
+# codebook for all seeds (CODEBOOK_SEED 0) and the cosine distance, Morgan
+# (radius 2, 2048 bits) the Tanimoto (Jaccard) distance.
+TABLE=(--__PREFIX__="'demo_tables'" --NUM_TEST="0.1" --NUM_TRAIN="1.0" --NUM_DATA="1.0"
+       --MODELS="['neural_net2', 'k_neighbors']" --NN_HIDDEN_LAYER_SIZES="(100, 100)"
+       --NN_LEARNING_RATE_INIT="0.001" --KN_NUM_NEIGHBORS="5" --KN_WEIGHTS="'uniform'")
+HDF_ARGS=(--CODEBOOK_SEED="0" --KN_METRIC="'cosine'")
+FP_ARGS=(--KN_METRIC="'jaccard'")
+LINES="$LOGS/lines_tables.txt"; : > "$LINES"
+for ds in $PRED_DATASETS; do
+  # primer: the first seed writes the dataset and HDF encoding caches
+  run_exp "predict_molecules__hdc__${ds}.yml" --SEED="${SEEDS[0]}" "${TABLE[@]}" "${HDF_ARGS[@]}"
+  run_exp "predict_molecules__fp__${ds}.yml"  --SEED="${SEEDS[0]}" "${TABLE[@]}" "${FP_ARGS[@]}"
+  for seed in "${SEEDS[@]:1}"; do
+    line "predict_molecules__hdc__${ds}.yml" --SEED="$seed" "${TABLE[@]}" "${HDF_ARGS[@]}" >> "$LINES"
+    line "predict_molecules__fp__${ds}.yml"  --SEED="$seed" "${TABLE[@]}" "${FP_ARGS[@]}" >> "$LINES"
   done
 done
+run_parallel "$LINES"
 
-# -- 2. Graph-edit-distance correlation across embedding sizes (Fig ged, a) --
-echo; echo "===== [2/4] GED correlation sweep ====="
+# -- 2. Bit-depth ablation (Supplementary Fig. S5) on FreeSolv -----------------
+echo; echo "===== [2/4] bit-depth ablation (Fig. S5, FreeSolv) ====="
+# The paper's exact command lines (protocols/ex_20.txt): float32, 16/8/4/2/1 bits
+# per dimension and a re-seeded float32 run per seed; the demo keeps FreeSolv.
+BITS_SELECT=(--grep "'freesolv'")
+[ "$BITS_SEEDS" != "all" ] && BITS_SELECT+=(--grep " --SEED=\"$BITS_SEEDS\"")
+python run_protocol.py ex_20 "${BITS_SELECT[@]}" --jobs "$JOBS" --log-dir "$LOGS" \
+    || echo "!!! bit-depth runs had failures (continuing)"
+( cd "$EXP" && python analyze_ex_20.py ex_20_bits_unit --out figures/figure_bits.pdf ) \
+    > "$LOGS/analyze_ex_20.log" 2>&1 || echo "!!! analyze_ex_20.py failed (log: $LOGS/analyze_ex_20.log)"
+
+# -- 3. Edit-based GED correlation across embedding sizes (Fig. 3a analogue) --
+echo; echo "===== [3/4] GED correlation sweep (Fig. 3a analogue, QM9 subsample) ====="
+LINES="$LOGS/lines_ged.txt"; : > "$LINES"
 for size in "${SIZES[@]}"; do
-  run_exp "molecule_similarity__hdc__qm9_smiles.yml" \
-      --__PREFIX__="'ex_08_a'" --SEED="0" --NUM_DATA="$GED_POOL" \
-      --GED_NUM_SAMPLES="$GED_SAMPLES" --EMBEDDING_SIZE="$size"
-  run_exp "molecule_similarity__fp__qm9_smiles.yml" \
-      --__PREFIX__="'ex_08_a'" --SEED="0" --NUM_DATA="$GED_POOL" \
-      --GED_NUM_SAMPLES="$GED_SAMPLES" --FINGERPRINT_SIZE="$size"
+  line molecule_similarity__hdc__qm9_smiles.yml --__PREFIX__="'demo_ged'" --SEED="0" --NUM_DATA="$GED_POOL" \
+       --GED_NUM_SAMPLES="$GED_SAMPLES" --EMBEDDING_SIZE="$size" >> "$LINES"
+  line molecule_similarity__fp__qm9_smiles.yml --__PREFIX__="'demo_ged'" --SEED="0" --NUM_DATA="$GED_POOL" \
+       --GED_NUM_SAMPLES="$GED_SAMPLES" --FINGERPRINT_SIZE="$size" >> "$LINES"
 done
+# the first run downloads QM9 once, the others run in parallel
+head -n 1 "$LINES" > "$LINES.first"; tail -n +2 "$LINES" > "$LINES.rest"
+JOBS=1 run_parallel "$LINES.first"; run_parallel "$LINES.rest"
 
-# -- 3. Bayesian optimization, low-dim ClogP targeting (Fig bo) --------------
-echo; echo "===== [3/4] Bayesian optimization ====="
-run_exp "optimize_molecule_bo__hdc__clogp.yml" \
-    --SEED="0" --NUM_DATA="$SUB" --EMBEDDING_SIZE="$BO_DIM" \
-    --NUM_TRIALS="$BO_TRIALS" --NUM_BO_ROUNDS="$BO_ROUNDS"
-run_exp "optimize_molecule_bo__fp__clogp.yml" \
-    --SEED="0" --NUM_DATA="$SUB" \
-    --NUM_TRIALS="$BO_TRIALS" --NUM_BO_ROUNDS="$BO_ROUNDS"
-run_exp "optimize_molecule_bo__random__clogp.yml" \
-    --SEED="0" --NUM_DATA="$SUB" \
-    --NUM_TRIALS="$BO_TRIALS" --NUM_BO_ROUNDS="$BO_ROUNDS"
+# -- 4. Bayesian optimization (Fig. 5a,b analogue) ----------------------------
+echo; echo "===== [4/4] Bayesian optimization (ClogP on AqSolDB, sizes $BO_SIZES, campaigns $BO_CAMPAIGNS) ====="
+# The revised BO benchmark (bo_benchmark.py, protocols/ex_24.txt): 20 initial
+# molecules + 150 rounds of one molecule; campaign k shares its initial design
+# across the methods and uses its own HDF codebook (seed 1000 + 100 k).
+bo() { ( cd "$EXP" && python bo_benchmark.py "$@" ) >> "$LOGS/bo_benchmark.log" 2>&1; }
+bo featurize --libraries aqsoldb --workers "$JOBS" \
+  && bo morgan --libraries aqsoldb --sizes $BO_SIZES --workers "$JOBS" \
+  && bo objectives --objectives clogp \
+  && bo encode --libraries aqsoldb --sizes $BO_SIZES --campaigns "$BO_CAMPAIGNS" --workers "$JOBS" \
+  && bo tasks --objectives clogp --sizes $BO_SIZES --campaigns "$BO_CAMPAIGNS" \
+  && bo run --workers "$JOBS" --threads 2 --gpus 0 \
+  && bo collect \
+  || echo "!!! BO benchmark failed (log: $LOGS/bo_benchmark.log, continuing)"
 
-# -- 4. Similarity-based virtual screening (supplementary) ------------------
-echo; echo "===== [4/4] virtual screening ====="
-for bset in "${BIO_SETS[@]}"; do
-  run_exp "predict_bioactivity__hdc__${bset}.yml" --__PREFIX__="'ex_11_bioact'" --NUM_REPETITIONS="$BIO_REPS"
-  run_exp "predict_bioactivity__fp__${bset}.yml"  --__PREFIX__="'ex_11_bioact'" --NUM_REPETITIONS="$BIO_REPS"
-done
+fi
 
-# -- 5. Paper-quality figures (the only figures surfaced to the reviewer) -----
+# -- 5. Demo figures ---------------------------------------------------------
 echo; echo "===== generating figures ====="
-for figscript in make_figure_prediction.py make_figure_ged.py make_figure_bo.py; do
+for figscript in demo_figure_prediction.py demo_figure_ged.py demo_figure_bo.py; do
   ( cd "$EXP" && python "$figscript" ) || echo "!!! $figscript failed (continuing)"
 done
 
 # -- 6. Collect metrics summary + every figure produced into $RESULTS_DIR ----
 echo; echo "===== collecting outputs ====="
 python collect_outputs.py "$EXP" "$RESULTS_DIR" || echo "!!! collect_outputs.py failed"
+[ -d "$EXP/_ex20" ] && cp -r "$EXP/_ex20" "$RESULTS_DIR/bits_ex_20"
+[ -f "$EX24_ROOT/campaigns.tsv" ] && cp "$EX24_ROOT/campaigns.tsv" "$RESULTS_DIR/bo_campaigns.tsv"
 
 echo
 echo "########################################################################"
